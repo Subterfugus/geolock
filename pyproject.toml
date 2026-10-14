@@ -20,7 +20,7 @@ dependencies = [
   "shapely>=2.0",
   "scipy>=1.10",
   "reverse_geocoder>=1.5",
-  "rapidocr_onnxruntime>=1.2",
+  "rapidocr>=3.4",
   "lingua-language-detector>=2.0",
 ]
 

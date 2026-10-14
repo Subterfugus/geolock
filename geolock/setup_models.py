@@ -128,6 +128,19 @@ def build_geoclip(out_dir, geo):
     np.savez(out_dir / "gallery.npz", gps=gps, feats=feats, country=country)
 
 
+def prefetch_ocr():
+    """Download the text-recognition models for non-Latin scripts (~10-15 MB each)."""
+    from .ocr import EXTRA_SCRIPTS, TextReader
+    reader = TextReader(allow_download=True)
+    if reader.ocr is None:
+        log("RapidOCR is not installed; skipping OCR models")
+        return
+    got = [s for s in EXTRA_SCRIPTS if reader.extra(s) is not None]
+    log(f"OCR models ready for: Latin, Chinese, Japanese, {', '.join(got)}")
+    if reader.unavailable:
+        log(f"  could not download: {', '.join(sorted(reader.unavailable))} (re-run setup to retry)")
+
+
 def export_vlm(out_dir, model_id):
     dest = out_dir / "vlm"
     cli = shutil.which("optimum-cli")
@@ -147,6 +160,7 @@ def main(argv=None):
     ap.add_argument("--vlm", nargs="?", const=VLM_ID, default=None, metavar="HF_ID",
                     help=f"also export a vision-language model (default {VLM_ID})")
     ap.add_argument("--vlm-only", action="store_true", help="only export the VLM")
+    ap.add_argument("--ocr-only", action="store_true", help="only download the OCR models")
     ap.add_argument("--random-clip", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
 
@@ -157,6 +171,8 @@ def main(argv=None):
     geo = GeoData()
 
     if not a.vlm_only:
+        prefetch_ocr()
+    if not (a.vlm_only or a.ocr_only):
         model, tok = load_clip(a.random_clip)
         if not a.prompts_only:
             export_vision(model, out, a.int8)

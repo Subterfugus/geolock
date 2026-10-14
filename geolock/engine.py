@@ -233,7 +233,9 @@ class Geolocator:
         if use_ocr:
             t = time.perf_counter()
             try:
-                ocr_lines = self.reader.read(im)
+                labels = [o["label"] for o in prompts.ATTRIBUTES["script"]["options"]]
+                hints = dict(zip(labels, attrs["script"].tolist()))
+                ocr_lines = self.reader.read(im, script_hints=hints)
                 clues += self.reader.clues(ocr_lines)
             except Exception as e:
                 clues.append(Clue(kind="ocr", title="Text reading failed", detail=str(e)[:200]))
