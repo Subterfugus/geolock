@@ -347,17 +347,17 @@ class Geolocator:
             live = cand[remaining[cand]]
             if not len(live):
                 break
-            # seed = candidate with the most posterior mass around it (not just the peak)
-            dens = [w_all[remaining & (haversine_km(lat[i], lon[i], lat, lon) <= self.cluster_km / 2)].sum()
-                    for i in live[:60]]
-            seed = int(live[int(np.argmax(dens))])
+            # seed = the single most probable remaining point. Seeding on the most mass
+            # nearby instead favoured broad, vague regions and lost a third of the hits
+            # within 200 km on the test set (see info.md, "Test sets and results").
+            seed = int(live[0])
             d = haversine_km(lat[seed], lon[seed], lat, lon)
             members = remaining & (d <= self.cluster_km)
             mass = float(w_all[members].sum())
             if out and mass < 0.01:
                 break
             core = members & (d <= self.cluster_km / 2)
-            clat, clon = weighted_center(lat[core], lon[core], w_all[core])
+            clat, clon = lat[seed], lon[seed]
             rlat, rlon = self._refine(clat, clon, q, country_ll, clues, lat[core], lon[core], w_all[core])
             dm = haversine_km(rlat, rlon, lat[members], lon[members])
             w = w_all[members] / w_all[members].sum()
@@ -371,7 +371,8 @@ class Geolocator:
                 "visual_mass": round(float(g_all[members].sum()), 4),
             })
             remaining &= ~members
-        out.sort(key=lambda g: -g["confidence"])
+        # Keep peak order: the first guess holds the most probable point, even when a
+        # broader area elsewhere adds up to more probability.
         return out
 
     def _refine(self, clat, clon, q, country_ll, clues, mlat, mlon, mpost):

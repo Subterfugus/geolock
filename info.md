@@ -154,7 +154,8 @@ the world instead of the Europe and US skew of Im2GPS3k.
 | GeoCLIP alone (top gallery point) | 0 % | 1 % | 5 % | 21 % | 45 % | 2,929 km |
 | GeoLock, default settings | 0 % | 3 % | 12 % | 29 % | 52 % | 2,222 km |
 | GeoLock, `--fit` settings | 0 % | 3 % | 13 % | 28 % | 52 % | 2,311 km |
-| `geolock eval` (clustered top guess) | 0 % | 1 % | 8 % | 26 % | 51 % | 2,417 km |
+| `geolock eval` top guess, first version | 0 % | 1 % | 8 % | 26 % | 51 % | 2,417 km |
+| `geolock eval` top guess, **after the fix below** | 0 % | 3 % | 12 % | 29 % | 52 % | 2,222 km |
 
 Country right 15 % of the time. By continent (within 2500 km): Europe 72 %, North
 America 70 %, Africa 49 %, Asia 46 %, Oceania 29 %, South America 14 % (only 7 photos).
@@ -165,9 +166,14 @@ What this says:
 - The real weights work end to end, and fusion helps: CLIP's zero-shot country classifier
   more than doubles the 200 km hit rate over GeoCLIP alone. Text clues add nothing here
   because these photos have no text.
-- The clustered top guess in `eval` does a bit worse than the posterior's best gallery
-  point (8 % vs 12 % at 200 km). Worth a look: the 250 km clusters may favour broad
-  regions over the single best match.
+- ~~The clustered top guess did worse than the posterior's best point.~~ Fixed: guesses
+  were seeded on "most probability within 125 km" and ranked by total mass, which
+  favoured broad, vague regions over the single best match. Now each guess is seeded on
+  the most probable remaining point and the guesses keep that order (confidence is
+  still the mass within 250 km). Within 200 km went from 8 % to 12 %.
+- A denser location gallery (815k points: GeoCLIP's 100k plus one point per 1 km cell
+  of MP-16's 4.7M photos) gave no clear gain on this set (9-11 % within 200 km), so the
+  100k gallery stays.
 - Confidence was too high. With default settings, photos rated 50 %+ confident were
   within 250 km only 35 % of the time, and 20-50 % ones 11 %. `--fit` chose temperature
   2.0 and country weight 0.75, which spreads the probabilities out. Fit again on the
@@ -242,6 +248,9 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: Final-pick fix: guesses are seeded on the most probable point, not on
+  the broadest area (8 % to 12 % within 200 km on the iNaturalist set).
 
 - **2026-10-14**: Test sets. `geolock testset` downloads a licensed, world-spread
   Wikimedia Commons set; `eval` reads `labels.csv` and can save per-photo results
