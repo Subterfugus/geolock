@@ -29,6 +29,8 @@ dependencies = [
 setup = ["torch>=2.2", "transformers>=4.40", "huggingface_hub>=0.23", "nncf>=2.12"]
 # Optional deep analysis with a local vision-language model.
 vlm = ["openvino-genai>=2025.0", "optimum-intel[openvino]>=1.22"]
+# Optional: ask Claude with an API key instead of a Claude Code login.
+api = ["anthropic>=0.70"]
 dev = ["pytest>=8"]
 
 [project.scripts]

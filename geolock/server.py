@@ -34,21 +34,25 @@ def _preview(data):
 def create_app(engine):
     app = FastAPI(title="GeoLock", docs_url=None, redoc_url=None)
     lock = threading.Lock()
+    from .analyst import detect
+    threading.Thread(target=detect, daemon=True).start()  # check the Claude / ChatGPT logins early
 
     @app.get("/api/status")
     def status():
+        from .analyst import detect
         return {"device": engine.device, "vlm": engine.has_vlm, "manifest": engine.manifest,
-                "available_devices": engine.core.available_devices}
+                "available_devices": engine.core.available_devices, "analysts": detect()}
 
     @app.post("/api/locate")
     def locate(file: UploadFile = File(...), ocr: bool = Form(True), vlm: bool = Form(False),
-               exif_gps: bool = Form(True)):
+               exif_gps: bool = Form(True), ask: str = Form(""), share_local: bool = Form(True)):
         data = file.file.read()
         if not data:
             raise HTTPException(400, "empty upload")
         try:
             with lock:
-                result = engine.locate(data, use_ocr=ocr, use_vlm=vlm, use_exif_gps=exif_gps)
+                result = engine.locate(data, use_ocr=ocr, use_vlm=vlm, use_exif_gps=exif_gps,
+                                       ask=[x for x in ask.split(",") if x], share_local=share_local)
             result["preview"] = _preview(data)
             return JSONResponse(result)
         except Exception as e:  # surface model errors in the UI instead of a bare 500

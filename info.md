@@ -8,7 +8,8 @@ _Last updated: 2026-10-14_
 ## Goal
 
 Give it a photo; it says where on Earth the photo was most likely taken, how confident
-it is, and why. Fully offline on a Lenovo Yoga 9i Aura (Core Ultra 7 258V, Arc 140V iGPU,
+it is, and why. Offline by default (optional second opinion from Claude or ChatGPT on the
+user's own plan) on a Lenovo Yoga 9i Aura (Core Ultra 7 258V, Arc 140V iGPU,
 AI Boost NPU, 32 GB shared RAM, no CUDA). No paid APIs. Results on a map with a
 confidence and the clues for each guess.
 
@@ -19,6 +20,7 @@ confidence and the clues for each guess.
 | Engine (CLIP + GeoCLIP on OpenVINO, fusion, clustering, refinement) | Built; **run with the real CLIP ViT-L/14 weights** (all tests pass) |
 | Clues: OCR + language, domains, phone codes, currency, mph, script, scene, EXIF time zone | Built and unit-tested |
 | Deep analysis with a local vision-language model | Built, **not yet run** (needs the laptop) |
+| Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | Windows setup script and launcher | Written, **not yet run on Windows** |
 | Accuracy on real photos | **First numbers** on 151 iNaturalist outdoor photos from 102 countries (see "Test sets and results"); everyday-photo numbers need `geolock testset` on the laptop |
@@ -86,6 +88,59 @@ Serbian, Arabic vs Persian vs Urdu, Hindi vs Marathi. The app never downloads at
 time; a script whose model is missing falls back to CLIP's script detector. The text
 angle classifier is off: it flipped long upright lines and garbled them.
 
+**Second opinion from Claude or ChatGPT (optional, `geolock/analyst.py`).** Brady wanted
+to use the Claude and ChatGPT plans they already pay for. Subscriptions have no API keys,
+so GeoLock runs the official CLIs the user is signed in to, as a subprocess, on request
+only:
+
+- Claude: `claude -p --input-format stream-json --output-format stream-json --verbose
+  --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence
+  --system-prompt … --json-schema …`, in an empty temp folder. The photo goes in as a
+  base64 image block on stdin; the answer comes back as `structured_output` in the
+  `result` event. Login check: `claude auth status --json` (`loggedIn`).
+- ChatGPT: `codex exec --skip-git-repo-check --sandbox read-only --ephemeral -C <tmp>
+  --image photo.jpg --output-schema schema.json --output-last-message answer.json -`
+  with the prompt on stdin. Login check: `codex login status` (exit code 0).
+- Fallbacks: no Claude Code but `ANTHROPIC_API_KEY` set and `anthropic` installed: the
+  Messages API with structured output (`claude-opus-5-5`, override with
+  `GEOLOCK_CLAUDE_MODEL`). Codex accepts an API key via `codex login --with-api-key`.
+  Older CLIs that reject a flag are retried with the bare minimum of flags.
+- Flags were checked against Claude Code 2.1.300 and Codex CLI 0.162.1 (`--help`), on
+  2026-10-14.
+
+What is sent: the pixels only, re-encoded as JPEG (≤1568 px), so EXIF GPS and camera
+serials never leave the machine, plus (unless "Share GeoLock's findings" is off) a short
+text briefing: GeoLock's top 3 guesses, country odds, OCR text, clue titles, CLIP scene
+labels and the camera's clock time. The prompt tells the model GeoLock's visual guesses
+are weak hints. The model returns reasoning, observations, driving side, text read and
+1-5 guesses with lat/lon, radius and probability.
+
+Fusion is a **mixture, not a product**: final = (1 − w) × local posterior + w × the
+analysts' distribution, where each analyst guess puts its stated probability in a bump of
+its stated radius (at least 25 km on the gallery) and what it left unassigned follows the
+local posterior; two analysts are averaged. `w` = 0.75 by default (`analyst_weight` in
+`models/calibration.json`). A product of likelihoods was tried first: a synthetic test
+showed a sharp GeoCLIP prior could drown out a 50 %-confident correct answer, which is the
+wrong way round for everyday photos, where frontier models are far stronger. When a
+guess is refined, the analyst's exact point is a candidate and the same mixture is
+applied locally, so the pin lands on the analyst's spot when it dominates. The
+analyst's country, driving side and observations are shown as clues with no extra
+weight (they are already part of its answer). `geolock eval --ask claude` also reports
+the analyst's own accuracy next to the fused one; `--fit` does not tune `w` yet.
+
+Terms and limits (as understood on 2026-10-14; check the current terms yourself):
+- This is personal use of the official CLIs with your own login, which both are built
+  for (Claude Code's `-p` print mode and `codex exec` are documented non-interactive
+  modes). GeoLock never reads, copies or reuses login tokens or web-session cookies.
+- Usage counts against your plan's limits. A 300-photo `eval --ask` is 300 requests
+  per analyst and can hit a 5-hour limit; run evals in smaller batches.
+- Anthropic does not allow third-party products to offer Claude.ai login to *other*
+  people. GeoLock running on your own machine with your own login is fine; shipping it
+  so others use their (or your) subscription through it is not what subscriptions are
+  for, so use API keys for that.
+- Photos sent this way are handled under Anthropic's or OpenAI's consumer terms for your
+  account (including their data-use settings), not GeoLock's offline promise.
+
 **Deep analysis (optional).** Qwen2.5-VL-7B-Instruct (Apache-2.0), INT4, through
 OpenVINO GenAI on the Arc GPU. It is asked for structured JSON: observations, driving
 side, text, country guesses. Those become clues at moderate weight. Expect seconds to
@@ -98,10 +153,11 @@ tens of seconds per photo; smaller option: `setup_models --vlm Qwen/Qwen2-VL-2B-
 | `geolock/engine.py` | The pipeline |
 | `geolock/setup_models.py` | One-time download, OpenVINO conversion, gallery and prompt embedding |
 | `geolock/clues.py`, `ocr.py`, `exif.py`, `vlm.py` | Clue sources |
+| `geolock/analyst.py` | Second opinion from Claude / ChatGPT via their CLIs, and how it is fused |
 | `geolock/countrymeta.py`, `prompts.py` | Clue knowledge tables and CLIP prompts |
 | `geolock/geodata.py`, `geolock/data/` | Offline borders, regions, place names |
 | `geolock/server.py`, `geolock/web/` | Local web app (FastAPI + Leaflet, all vendored) |
-| `geolock/cli.py` | `serve`, `locate`, `eval`, `bench`, `testset` |
+| `geolock/cli.py` | `serve`, `locate`, `eval`, `bench`, `testset`, `analysts` |
 | `geolock/testset.py` | Downloads the Wikimedia Commons test set |
 | `tools/build_geodata.py` | Rebuilds the bundled Natural Earth files |
 | `tools/build_inat_testset.py` | Builds a test set from iNaturalist open data (fallback) |
@@ -247,6 +303,8 @@ about real-photo accuracy yet.
 - Shorter text now counts for language detection.
 
 **Worth adding next (in order)**
+0. Measure the second opinion: `geolock eval data/testset --ask claude` on ~50 photos
+   (fused vs Claude alone vs GeoLock alone), then let `--fit` tune `analyst_weight`.
 1. Run setup, `geolock bench`, `geolock testset data/testset` and
    `geolock eval data/testset --fit` on the laptop. Everything else depends on these
    numbers.
@@ -260,6 +318,11 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: Second opinion from Claude or ChatGPT on the user's own plan ("Ask
+  Claude" / "Ask ChatGPT" in the app, `--ask` on the CLI, `geolock analysts`), blended
+  in as a mixture. Tests with fake CLIs and a synthetic-model engine; the Claude path run
+  for real.
 
 - **2026-10-14**: Final-pick fix: guesses are seeded on the most probable point, not on
   the broadest area (8 % to 12 % within 200 km on the iNaturalist set).

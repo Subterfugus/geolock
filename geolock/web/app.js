@@ -1,6 +1,7 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const COLORS = { high: "--high", medium: "--medium", low: "--low" };
+const ANALYST = { claude: { color: "--claude", letter: "C" }, chatgpt: { color: "--chatgpt", letter: "G" } };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const pct = (p) => (p >= 0.995 ? "99%" : p < 0.01 ? "<1%" : Math.round(p * 100) + "%");
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -60,7 +61,24 @@ fetch("/api/status").then((r) => r.json()).then((s) => {
     $("#vlm-label").classList.add("disabled");
     $("#vlm-label").title = "Not installed. Run setup with --vlm to enable.";
   }
+  for (const [key, st] of Object.entries(s.analysts || {})) {
+    const box = $(`#ask-${key}`), label = $(`#ask-${key}-label`);
+    if (!box) continue;
+    label.title = st.detail || "";
+    if (!st.available) { box.disabled = true; box.checked = false; label.classList.add("disabled"); }
+    else {
+      try { box.checked = localStorage.getItem("ask-" + key) === "1"; } catch (e) { /* storage off */ }
+    }
+  }
+  updateAskNote();
 }).catch(() => { $("#device").textContent = "offline?"; });
+
+const askBoxes = () => [...document.querySelectorAll("#ask-row input[data-provider]")];
+function updateAskNote() { $("#ask-note").hidden = !askBoxes().some((b) => b.checked); }
+askBoxes().forEach((b) => b.addEventListener("change", () => {
+  try { localStorage.setItem("ask-" + b.dataset.provider, b.checked ? "1" : "0"); } catch (e) { /* storage off */ }
+  updateAskNote();
+}));
 
 // ---------------------------------------------------------------- upload
 const drop = $("#drop");
@@ -82,12 +100,17 @@ async function analyse(file) {
   showPreview(url);
   $("#error").hidden = true;
   $("#busy").hidden = false;
-  $("#busy-text").textContent = $("#opt-vlm").checked ? "Analysing (deep analysis can take a while)…" : "Analysing…";
+  const ask = askBoxes().filter((b) => b.checked && !b.disabled).map((b) => b.dataset.provider);
+  const askNames = ask.map((p) => p === "claude" ? "Claude" : "ChatGPT").join(" and ");
+  $("#busy-text").textContent = ask.length ? `Analysing, then asking ${askNames} (can take a minute)…`
+    : $("#opt-vlm").checked ? "Analysing (deep analysis can take a while)…" : "Analysing…";
   const fd = new FormData();
   fd.append("file", file);
   fd.append("ocr", $("#opt-ocr").checked);
   fd.append("vlm", $("#opt-vlm").checked);
   fd.append("exif_gps", $("#opt-exif").checked);
+  fd.append("ask", ask.join(","));
+  fd.append("share_local", $("#opt-share").checked);
   try {
     const r = await fetch("/api/locate", { method: "POST", body: fd });
     const data = await r.json();
@@ -119,12 +142,14 @@ function show(entry) {
   const d = entry.data;
   $("#results").hidden = false;
   renderGuesses(d);
+  renderAnalysts(d);
   renderCountries(d);
   renderClues(d);
   $("#scene").innerHTML = d.scene.map((s) => `<span class="chip" title="${esc(s.attribute)}">${esc(s.value)} <span>${pct(s.prob)}</span></span>`).join("");
   const t = d.timings;
   $("#timings").textContent = `Device ${d.device} · CLIP ${t.clip_ms} ms` + (t.ocr_ms != null ? ` · OCR ${t.ocr_ms} ms` : "") +
-    (t.vlm_ms != null ? ` · VLM ${t.vlm_ms} ms` : "") + ` · total ${t.total_ms} ms · ${d.image.width}×${d.image.height}` +
+    (t.vlm_ms != null ? ` · VLM ${t.vlm_ms} ms` : "") +
+    (t.llm_ms != null ? ` · second opinions ${(t.llm_ms / 1000).toFixed(0)} s` : "") + ` · total ${t.total_ms} ms · ${d.image.width}×${d.image.height}` +
     (d.exif.camera ? ` · ${d.exif.camera}` : "") + (d.exif.datetime ? ` · ${d.exif.datetime}` : "");
   $("#vlm-raw").hidden = !d.vlm_raw;
   $("#vlm-raw").textContent = d.vlm_raw || "";
@@ -173,6 +198,27 @@ function renderGuesses(d) {
   }).join("");
   $("#guesses").querySelectorAll("li").forEach((li) => li.onclick = () => {
     selected = +li.dataset.i; renderGuesses(d); focusGuess(selected); });
+}
+
+function renderAnalysts(d) {
+  const list = d.analysts || [];
+  $("#analysts").innerHTML = list.map((a, ai) => {
+    const style = `--who:var(${ANALYST[a.provider].color})`;
+    const meta = [a.model, a.ms != null ? Math.round(a.ms / 1000) + " s" : null].filter(Boolean).join(" · ");
+    if (!a.ok) return `<div class="analyst" style="${style}"><div class="head"><span class="who">${esc(a.name)}</span>
+      <span class="meta">${esc(meta)}</span></div><div class="err">No answer: ${esc(a.error)}</div></div>`;
+    const guesses = a.guesses.map((g, gi) => `<li data-a="${ai}" data-g="${gi}">${esc([g.place, g.country].filter(Boolean).join(", "))}
+      <span class="pct">${pct(g.confidence)} · ±${Math.round(g.radius_km)} km${g.km_from_exif != null ? ` · ${Math.round(g.km_from_exif)} km from EXIF` : ""}</span></li>`).join("");
+    const clues = a.clues.length ? `<details><summary>What ${esc(a.name)} saw (${a.clues.length})</summary><ul>` +
+      a.clues.map((c) => `<li><b>${esc(c.clue)}</b>${c.suggests ? ": " + esc(c.suggests) : ""}</li>`).join("") + `</ul></details>` : "";
+    return `<div class="analyst" style="${style}"><div class="head"><span class="who">${esc(a.name)}'s view</span>
+      <span class="meta" title="${esc(a.via)}">${esc(meta)}</span></div>
+      <div class="reason">${esc(a.reasoning)}</div><ol>${guesses}</ol>${clues}</div>`;
+  }).join("");
+  $("#analysts").querySelectorAll("li[data-a]").forEach((li) => li.onclick = () => {
+    const g = list[+li.dataset.a].guesses[+li.dataset.g];
+    map.flyTo([g.lat, g.lon], g.radius_km < 30 ? 9 : g.radius_km < 100 ? 7 : 5, { duration: 0.8 });
+  });
 }
 
 function renderCountries(d) {
@@ -236,6 +282,19 @@ function drawMap(d) {
     // Frame only guesses that matter, so one stray low guess doesn't zoom out to the world.
     if (i === 0 || g.confidence >= 0.25 * d.guesses[0].confidence) pts.push([g.lat, g.lon]);
   });
+  for (const a of d.analysts || []) {
+    if (!a.ok) continue;
+    const c = css(ANALYST[a.provider].color), letter = ANALYST[a.provider].letter;
+    a.guesses.forEach((g, gi) => {
+      const place = [g.place, g.country].filter(Boolean).join(", ");
+      L.marker([g.lat, g.lon], { icon: L.divIcon({ className: "", iconSize: [24, 24],
+        html: `<div class="llm-pin" style="background:${c};opacity:${gi ? 0.75 : 1}"><span>${letter}${gi ? gi + 1 : ""}</span></div>` }),
+        zIndexOffset: 1500 - gi * 10 }).addTo(overlay)
+        .bindPopup(`<b>${esc(a.name)} #${gi + 1}: ${esc(place)}</b><br>${pct(g.confidence)} sure · ±${Math.round(g.radius_km)} km<br>
+          <small>${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}</small>${gi === 0 ? `<br><small>${esc(a.reasoning.slice(0, 300))}</small>` : ""}`);
+      if (gi === 0) pts.push([g.lat, g.lon]);
+    });
+  }
   if (d.exif_gps) {
     L.marker([d.exif_gps.lat, d.exif_gps.lon], { icon: L.divIcon({ className: "", html: `<div class="exif-pin" title="EXIF GPS">★</div>`, iconSize: [26, 26] }),
       zIndexOffset: 2000 }).bindPopup(`<b>EXIF GPS</b> (from the photo's metadata)<br>${d.exif_gps.lat.toFixed(5)}, ${d.exif_gps.lon.toFixed(5)}`)

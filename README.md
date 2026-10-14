@@ -2,7 +2,8 @@
 
 Drop in a photo; GeoLock tells you where on Earth it was most likely taken, how sure it
 is, and why. It runs entirely on your laptop with OpenVINO (Intel Arc GPU, NPU or CPU).
-No cloud, no API keys, no subscriptions.
+No cloud, no API keys, no subscriptions. Optionally, it can also ask Claude or ChatGPT
+for a second opinion using the plan you already pay for (see below).
 
 ![Ranked guesses on a map, a confidence for each, and the clues behind them](docs/screenshot.png)
 
@@ -44,10 +45,33 @@ Linux/macOS: `./setup.sh` then `.venv/bin/python -m geolock`.
 - A **heatmap** of everywhere the model considered, and the photo's own **EXIF GPS**
   (★) when present so you can check the answer.
 
+## Second opinion from Claude or ChatGPT (optional)
+
+Tick **Ask Claude** or **Ask ChatGPT** before dropping a photo. GeoLock first does its own
+analysis, then sends the photo and a short summary of what it found to the model, and
+shows the model's reasoning, its guesses (◆ C / ◆ G on the map) and what it saw. Its
+answer is blended into the ranked guesses (75 % weight by default, honouring the model's
+own confidence). Untick **Share GeoLock's findings** for a fully independent opinion.
+
+It uses your own login through the official command-line tools, so it counts against
+your plan's usage, not an API bill:
+
+- Claude (Pro or Max): install [Claude Code](https://code.claude.com/docs/en/setup), then
+  run `claude auth login` once.
+- ChatGPT (Plus, Pro, Business…): `npm i -g @openai/codex`, then `codex login` once.
+
+`geolock analysts` says which are ready. The boxes are greyed out (hover for why) until
+then. Only the photo's pixels are sent: its metadata, including GPS, stays on your
+computer. Each answer takes about 5-60 seconds. API keys also work if you prefer
+(`ANTHROPIC_API_KEY` with `pip install anthropic`, or `codex login --with-api-key`), but
+those are billed per use.
+
 ## Command line
 
 ```bash
 geolock locate photo.jpg [--json] [--vlm]   # print guesses
+geolock locate photo.jpg --ask claude --ask chatgpt   # plus second opinions
+geolock analysts                            # is Claude / ChatGPT usable from here?
 geolock eval ~/Pictures/trips --fit         # accuracy on your own geotagged photos,
                                             # and tune confidence to match them
 geolock testset data/testset                # download ~300 openly licensed geotagged
