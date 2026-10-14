@@ -22,10 +22,10 @@ confidence and the clues for each guess.
 | Deep analysis with a local vision-language model | Built, **not yet run** (needs the laptop) |
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
-| Windows setup script and launcher | Written, **not yet run on Windows** |
-| Accuracy on real photos | **First numbers** on 151 iNaturalist outdoor photos from 102 countries (see "Test sets and results"); everyday-photo numbers need `geolock testset` on the laptop |
-| Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded (not runnable from the build machine) |
-| Confidence calibration | Built (`eval --fit` saves `models/calibration.json`); fit it on the Commons set or your own photos |
+| Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
+| Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
+| Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
+| Confidence calibration | Built and **fitted on the Commons set** (temperature 1.5, country weight 0.5) |
 
 Why some things are untested: the build machine has no access to Hugging Face,
 Wikimedia, Flickr or Mapillary. The real CLIP weights were found inside a public Docker
@@ -195,8 +195,36 @@ to the square root of their number of towns (at most 4 each by default). Maps, f
 scans, artwork, museum and interior shots are skipped by title and category. It writes
 `labels.csv` (file, true lat/lon, country, title, author, licence, link) and
 `ATTRIBUTION.md`. `geolock eval` reads `labels.csv` when present, so EXIF is not needed.
-Re-running tops up an interrupted download. Not run yet: Commons is blocked on the build
-machine, so only its logic is tested (`tests/test_testset.py`, with a fake Commons).
+Re-running tops up an interrupted download. First run (Windows, 2026-10-14): 295 photos
+from 202 countries in about 45 minutes; most of the time goes on Commons API searches.
+
+**Results on the Commons set (2026-10-14, Windows desktop, CPU, no VLM, no Claude/ChatGPT)**
+
+Machine: Acer Predator PO5-655 desktop, Intel Core i7-14700F (20 cores, no integrated
+graphics), NVIDIA RTX 4070 Ti SUPER, 32 GB RAM, Windows 11 Home, Python 3.12,
+OpenVINO 2026.4. Not the target laptop: OpenVINO lists the NVIDIA card as `GPU` but cannot
+compile CLIP for it, so everything ran on the CPU. `geolock bench`: CLIP 1.25 s per photo,
+full pipeline 2.6 s (CLIP 1.25 s, OCR 0.7 s, fusion 0.65 s).
+
+| | 1 km | 25 km | 200 km | 750 km | 2500 km | median | country |
+|---|---|---|---|---|---|---|---|
+| GeoLock, default settings, 295 photos | 1 % | 11 % | 26 % | 51 % | 67 % | 725 km | 39 % |
+| Same, first 163 photos only | 1 % | 11 % | 28 % | 52 % | 69 % | 600 km | 40 % |
+| iNaturalist nature set, for comparison | 0 % | 3 % | 12 % | 29 % | 52 % | 2,222 km | 15 % |
+
+- Everyday places (streets, buildings, landscapes near towns) are about twice as easy as
+  the nature set at 200 km, and the right country goes from 15 % to 39 %.
+- Confidence is roughly honest now: guesses said to be 50 %+ confident were within
+  250 km 57 % of the time, 20-50 % ones 33 %, under 20 % ones 6 %.
+- `--fit` chose temperature 1.5 and country weight 0.5, saved to `models/calibration.json`.
+- **StreetCLIP tried, not worth it.** On the RTX card (CUDA PyTorch, experiment only,
+  `tools/streetclip_experiment.py`), StreetCLIP's zero-shot country guess was right 40 %
+  of the time against CLIP's 33 % (38 % on all 295). But inside GeoLock's fusion,
+  replacing or combining CLIP's country vote with StreetCLIP's moved the 163-photo
+  results by -2 to +3 points (one photo is 0.6 points): 29 % vs 28 % within 200 km,
+  country 45 % vs 42 % at best. Within noise, and its licence is non-commercial, so it
+  is not ported to OpenVINO. GeoCLIP's visual prior already carries most of what
+  StreetCLIP knows.
 
 **iNaturalist fallback** (`tools/build_inat_testset.py`). iNaturalist's open data on AWS
 was reachable, so the first real numbers come from it. The tool streams the metadata
@@ -280,7 +308,8 @@ about real-photo accuracy yet.
   Accuracy on everyday photos still needs `geolock testset` + `eval` on the laptop.
 - Deep analysis (Qwen2.5-VL-7B via OpenVINO GenAI). The code follows the current GenAI
   API, and pip resolves its dependencies, but the model has never been loaded.
-- `setup.ps1` on Windows, and speed on the Arc GPU and NPU.
+- ~~`setup.ps1` on Windows~~: done (desktop PC). Speed on the Arc GPU and NPU still
+  needs the laptop.
 
 **Weak spots**
 - Confidence numbers are uncalibrated. With strong visual matches GeoCLIP's softmax is
@@ -307,11 +336,10 @@ about real-photo accuracy yet.
 - Shorter text now counts for language detection.
 
 **Worth adding next (in order)**
-0. Measure the second opinion: `geolock eval data/testset --ask claude` on ~50 photos
-   (fused vs Claude alone vs GeoLock alone), then let `--fit` tune `analyst_weight`.
-1. Run setup, `geolock bench`, `geolock testset data/testset` and
-   `geolock eval data/testset --fit` on the laptop. Everything else depends on these
-   numbers.
+0. Measure the second opinion (`--ask claude`) only if Brady asks: it uses his plan.
+   Evals stay local-only by default.
+1. ~~Run setup, bench, testset and eval~~: done on the Windows desktop (see "Results on
+   the Commons set"). Still to do on the laptop: `geolock bench` for Arc GPU / NPU speed.
 2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
    recognisable.
 3. ~~Multilingual OCR~~ (done, see the changelog).
@@ -322,6 +350,12 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: First run on real Windows (desktop PC). `setup.ps1` works; fixes:
+  the Arabic OCR model needs `python-bidi` (now `rapidocr[rtl]`), `setup.ps1` stops if
+  pip fails, and `AUTO` only uses Intel GPUs (OpenVINO lists NVIDIA cards too but can't
+  run CLIP on them). First Commons numbers: 26 % within 200 km, country 39 %. StreetCLIP
+  measured and rejected (`tools/streetclip_experiment.py`).
 
 - **2026-10-14**: Second opinion from Claude or ChatGPT on the user's own plan ("Ask
   Claude" / "Ask ChatGPT" in the app, `--ask` on the CLI, `geolock analysts`), blended

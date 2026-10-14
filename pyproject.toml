@@ -20,7 +20,7 @@ dependencies = [
   "shapely>=2.0",
   "scipy>=1.10",
   "reverse_geocoder>=1.5",
-  "rapidocr>=3.4",
+  "rapidocr[rtl]>=3.4",  # rtl: python-bidi, needed by the Arabic model
   "lingua-language-detector>=2.0",
 ]
 

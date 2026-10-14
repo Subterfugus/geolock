@@ -27,7 +27,9 @@ $python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 $extras = "setup"
 if ($Vlm) { $extras = "setup,vlm" }
 & $python -m pip install -e ".[$extras]"
+if ($LASTEXITCODE -ne 0) { throw "pip install failed (see the messages above)" }
 & $python -m pip install geoclip --no-deps
+if ($LASTEXITCODE -ne 0) { throw "pip install geoclip failed" }
 
 $setupArgs = @()
 if ($Int8) { $setupArgs += "--int8" }
