@@ -81,3 +81,11 @@ def test_vlm_json_parsing():
     assert set(side.countries) == {"RU"}
     guess = [c for c in clues if c.kind == "vlm_guess"][0]
     assert guess.countries == {"RU": 1.0}
+
+
+def test_heic_photos_open(tmp_path):
+    pytest.importorskip("pillow_heif")
+    import geolock.engine  # registers the HEIF opener
+    p = tmp_path / "x.heic"
+    Image.new("RGB", (64, 48), (200, 10, 10)).save(p)
+    assert Image.open(p).size == (64, 48)

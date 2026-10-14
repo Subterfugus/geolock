@@ -21,7 +21,8 @@ confidence and the clues for each guess.
 | Deep analysis with a local vision-language model | Built, **not yet run** (needs the laptop) |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | Windows setup script and launcher | Written, **not yet run on Windows** |
-| Accuracy on real photos | **Not measured yet**: run `geolock eval` on a folder of geotagged photos |
+| Accuracy on real photos | **Not measured yet**: run `geolock eval <folder> --fit` on geotagged photos |
+| Confidence calibration | Built (`eval --fit` saves `models/calibration.json`); needs your photos |
 
 Why some things are untested: the build machine had no access to Hugging Face, so the
 real CLIP weights (and the optional VLM) could only be downloaded on the laptop. Every
@@ -114,15 +115,69 @@ Set `GEOLOCK_MODELS` to keep them elsewhere and `GEOLOCK_DEVICE` to force a devi
   Leaflet; an OpenStreetMap layer is available from the layer switcher when online.
 - **EXIF GPS is shown, never used for the guess.** It appears as a ★ so you can compare.
 
-## Next steps
+## Audit (2026-10-14)
 
-1. Run `.\setup.ps1` on the laptop, then `geolock bench` and `geolock eval <folder>`.
-2. Tune `--country-weight` and `--temperature` from the eval results; make them the defaults.
-3. Try `-Vlm` and compare eval numbers with and without it.
-4. Ideas after that: a denser gallery for regions GeoCLIP's gallery covers thinly, sun
-   position from shadows plus EXIF time, licence-plate and bollard detectors.
+An honest pass over every feature. "Ran here" means it ran on the build machine with
+placeholder CLIP weights (Hugging Face is blocked there), so nothing below says anything
+about real-photo accuracy yet.
+
+**Working (ran here)**
+- Whole pipeline from upload to map: crops, OpenVINO inference, GeoCLIP gallery scoring,
+  fusion, clustering, refinement, naming, explanations. 16 tests pass.
+- GeoCLIP location encoder port matches the original to 1e-5; with a known location fed
+  in, the top guess lands within 1 km (Paris, Kyoto, Nairobi).
+- Text clues: OCR reads printed signs; language, `.de`-style domains (even when OCR adds
+  spaces), phone prefixes, currency and mph are detected. A German shop sign moved
+  Germany from ~1 % to ~60 % against a random visual prior.
+- EXIF reading (GPS, time zone, camera), EXIF ★ on the map, HEIC photos from iPhones.
+- Web app in light, dark and phone layouts; offline basemap with labels and region lines.
+- `geolock eval --fit` end to end.
+
+**Not run yet (needs the laptop)**
+- Real CLIP weights, so real accuracy, the CLIP country classifier, and the script and
+  scene clues are unverified.
+- Deep analysis (Qwen2.5-VL-7B via OpenVINO GenAI). The code follows the current GenAI
+  API, and pip resolves its dependencies, but the model has never been loaded.
+- `setup.ps1` on Windows, and speed on the Arc GPU and NPU.
+
+**Weak spots**
+- Confidence numbers are uncalibrated. With strong visual matches GeoCLIP's softmax is
+  very peaked, so it may say 95 %+ too easily. Fixed in this pass by `eval --fit`, which
+  learns the right settings from your own photos (see below).
+- OCR only reads Latin and Chinese text and drops accents. Cyrillic, Arabic, Thai,
+  Hangul and others rely on CLIP's rough script detector unless deep analysis is on.
+- Driving side is only detected by the VLM. CLIP can't see it reliably.
+- Clue strengths and the country tables are hand-set. Reasonable, but untested.
+- Place names come from GeoNames' list of places with 1000+ people, which sometimes names
+  a suburb ("Riehl") rather than the city everyone knows ("Cologne").
+- Short signs (two or three words) rarely trigger a language clue. Loosened slightly in
+  this pass.
+
+**Fixed in this pass**
+- iPhone HEIC photos are supported (analysis and preview).
+- `geolock eval <folder> --fit` tunes GeoCLIP's temperature and the CLIP country weight
+  to make confidence honest on your photos, and saves them to `models/calibration.json`,
+  which the app then uses automatically.
+- The map no longer zooms out to the whole world because of one faint far-away guess.
+- Shorter text now counts for language detection.
+
+**Worth adding next (in order)**
+1. Run setup, `geolock bench`, and `geolock eval <folder> --fit` on the laptop. Everything
+   else depends on these numbers.
+2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
+   recognisable.
+3. Multilingual OCR (PaddleOCR has Cyrillic, Arabic, Korean, Japanese, Devanagari and
+   other models), to read signs without the VLM.
+4. A denser location gallery outside Europe and North America, where GeoCLIP's 100k
+   points are thin.
+5. Sun direction: shadows plus the EXIF time give latitude and orientation hints.
+6. Detectors for licence plates, bollards and road signs (the classic GeoGuessr clues).
+7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
 
+- **2026-10-14**: Audit (above). Added HEIC support, `eval --fit` calibration, tighter
+  map framing, shorter-text language detection, and a `.claude/settings.json` that
+  pre-approves common commands for Claude sessions.
 - **2026-10-14**: First version. Engine, clues, optional VLM, map app, setup scripts,
   tests, docs.

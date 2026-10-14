@@ -19,6 +19,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
+try:  # iPhone photos (HEIC/HEIF)
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
+
 from . import prompts
 from .clues import Clue
 from .config import CROPS, DEVICE, MODELS_DIR
@@ -68,12 +74,17 @@ def _log_softmax(x):
 
 
 class Geolocator:
-    def __init__(self, models_dir=MODELS_DIR, device=DEVICE, country_weight=0.5,
-                 temperature=1.0, cluster_km=250.0):
+    def __init__(self, models_dir=MODELS_DIR, device=DEVICE, country_weight=None,
+                 temperature=None, cluster_km=250.0):
         self.models_dir = Path(models_dir)
         self.requested_device = device
-        self.country_weight = country_weight
-        self.temperature = temperature
+        # Fusion settings: explicit arguments win, then `geolock eval --fit` results, then defaults.
+        cal_path = self.models_dir / "calibration.json"
+        self.calibration = json.loads(cal_path.read_text()) if cal_path.exists() else {}
+        self.country_weight = (country_weight if country_weight is not None
+                               else self.calibration.get("country_weight", 0.5))
+        self.temperature = (temperature if temperature is not None
+                            else self.calibration.get("temperature", 1.0))
         self.cluster_km = cluster_km
         self.geo = GeoData()
         self.reader = TextReader()
@@ -171,9 +182,7 @@ class Geolocator:
         return None
 
     # ------------------------------------------------------------ main entry
-    def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5):
-        t0 = time.perf_counter()
-        timings = {}
+    def open_image(self, image):
         if isinstance(image, (bytes, bytearray)):
             im = Image.open(io.BytesIO(image))
         elif isinstance(image, Image.Image):
@@ -181,18 +190,19 @@ class Geolocator:
         else:
             im = Image.open(image)
         meta = read_exif(im)
-        im = ImageOps.exif_transpose(im).convert("RGB")
+        return ImageOps.exif_transpose(im).convert("RGB"), meta
+
+    def evidence(self, im, meta, use_ocr=True, use_vlm=False, timings=None):
+        """Everything the photo tells us, before fusion: GeoCLIP query, CLIP country
+        probabilities, clues, scene labels, OCR lines and raw VLM output."""
+        timings = {} if timings is None else timings
+        t0 = time.perf_counter()
         codes = self.geo.country_codes
-        n_c = len(codes)
-
-        # 1-2. vision + GeoCLIP visual prior
-        emb = self.embed(im)
+        emb_mean = self.embed(im).mean(0)
         timings["clip_ms"] = round((time.perf_counter() - t0) * 1000)
-        emb_mean = emb.mean(0)
         q = self.geoclip_query(emb_mean)
-        log_geo = _log_softmax(self.geo_logits(q, self.gal_feats))
 
-        # 3a. CLIP zero-shot country and scene attributes
+        # CLIP zero-shot country and scene attributes
         img_n = normalize(emb_mean)
         p_country_clip = _softmax(self.clip_scale * self.country_text @ img_n)
         attrs = self.attribute_probs(img_n)
@@ -218,7 +228,7 @@ class Geolocator:
                                   strength=min(0.5, (p - chance)), countries=opt["countries"],
                                   background=0.35))
 
-        # 3b. text in the image
+        # text in the image
         ocr_lines = []
         if use_ocr:
             t = time.perf_counter()
@@ -229,10 +239,9 @@ class Geolocator:
                 clues.append(Clue(kind="ocr", title="Text reading failed", detail=str(e)[:200]))
             timings["ocr_ms"] = round((time.perf_counter() - t) * 1000)
 
-        # 3c. EXIF
         clues += exif_clues(meta)
 
-        # 3d. optional vision-language model
+        # optional vision-language model
         vlm_raw = None
         if use_vlm and self.has_vlm:
             from .vlm import vlm_clues
@@ -243,19 +252,38 @@ class Geolocator:
             except Exception as e:
                 clues.append(Clue(kind="vlm", title="Vision-language model failed", detail=str(e)[:200]))
             timings["vlm_ms"] = round((time.perf_counter() - t) * 1000)
+        return {"q": q, "p_country_clip": p_country_clip, "clues": clues, "scene": scene,
+                "ocr": ocr_lines, "vlm_raw": vlm_raw}
 
-        # 3e. fuse: per-country log-likelihood, then broadcast to gallery points
-        country_ll = self.country_weight * np.log(p_country_clip + 1e-9)
+    def posterior(self, q, p_country_clip, clues, temperature=None, country_weight=None):
+        """Fuse GeoCLIP's visual prior with every clue. Returns (log_post, log_geo, country_ll)."""
+        temperature = self.temperature if temperature is None else temperature
+        country_weight = self.country_weight if country_weight is None else country_weight
+        log_geo = _log_softmax(self.geo_scale * (self.gal_feats @ q) / temperature)
+        country_ll = country_weight * np.log(p_country_clip + 1e-9)
         for c in clues:
-            ll = c.country_loglik(codes)
+            ll = c.country_loglik(self.geo.country_codes)
             if ll is not None:
                 country_ll = country_ll + ll
         ll_pad = np.append(country_ll, np.median(country_ll))  # index -1 = open water
         log_post = log_geo + ll_pad[self.gal_country]
         for c in clues:
             if c.point_fn is not None and c.strength > 0:
-                log_post += np.log((1 - c.strength) + c.strength * c.point_fn(self.gps[:, 0], self.gps[:, 1]))
-        post = _softmax(log_post)
+                log_post = log_post + np.log((1 - c.strength) + c.strength * c.point_fn(self.gps[:, 0], self.gps[:, 1]))
+        return log_post - np.log(np.exp(log_post - log_post.max()).sum()) - log_post.max(), log_geo, country_ll
+
+    def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
+               keep_evidence=False):
+        t0 = time.perf_counter()
+        timings = {}
+        im, meta = self.open_image(image)
+        codes = self.geo.country_codes
+        n_c = len(codes)
+        ev = self.evidence(im, meta, use_ocr, use_vlm, timings)
+        q, p_country_clip, clues = ev["q"], ev["p_country_clip"], ev["clues"]
+        scene, ocr_lines, vlm_raw = ev["scene"], ev["ocr"], ev["vlm_raw"]
+        log_post, log_geo, country_ll = self.posterior(q, p_country_clip, clues)
+        post = np.exp(log_post)
         p_geo = np.exp(log_geo)
 
         # country distribution
@@ -300,6 +328,8 @@ class Geolocator:
                 g["km_from_exif"] = round(float(haversine_km(g["lat"], g["lon"], exif_gps["lat"], exif_gps["lon"])), 1)
             result["exif_place"] = self.geo.describe(exif_gps["lat"], exif_gps["lon"])
         timings["total_ms"] = round((time.perf_counter() - t0) * 1000)
+        if keep_evidence:
+            result["_evidence"] = ev
         return result
 
     # ------------------------------------------------------------- internals

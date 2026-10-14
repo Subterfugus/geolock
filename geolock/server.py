@@ -1,5 +1,9 @@
 """Local web app: http://127.0.0.1:7860 (nothing leaves the machine)."""
+import base64
+import io
 import threading
+
+from PIL import Image, ImageOps
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -7,6 +11,24 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import WEB_DIR
 from .geodata import DATA
+
+
+BROWSER_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP"}
+
+
+def _preview(data):
+    """A JPEG preview for formats browsers can't show (HEIC from iPhones, TIFF)."""
+    try:
+        im = Image.open(io.BytesIO(data))
+        if im.format in BROWSER_FORMATS:
+            return None
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((1280, 1280))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=85)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
 
 
 def create_app(engine):
@@ -26,8 +48,9 @@ def create_app(engine):
             raise HTTPException(400, "empty upload")
         try:
             with lock:
-                return JSONResponse(engine.locate(data, use_ocr=ocr, use_vlm=vlm,
-                                                  use_exif_gps=exif_gps))
+                result = engine.locate(data, use_ocr=ocr, use_vlm=vlm, use_exif_gps=exif_gps)
+            result["preview"] = _preview(data)
+            return JSONResponse(result)
         except Exception as e:  # surface model errors in the UI instead of a bare 500
             raise HTTPException(422, f"{type(e).__name__}: {e}")
 
