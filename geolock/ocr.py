@@ -87,13 +87,13 @@ class TextReader:
                               strength=min(0.8, 0.3 + 0.1 * scripts["Han"]),
                               countries=LANGUAGE_COUNTRIES["CHINESE"], background=0.05))
         latin = " ".join(re.findall(r"[^\W\d_]{2,}", text))
-        if scripts.get("Latin", 0) >= 12 and self.lang_detector is not None:
+        if scripts.get("Latin", 0) >= 10 and self.lang_detector is not None:
             conf = self.lang_detector.compute_language_confidence_values(latin)
             if conf:
                 best = conf[0]
                 name = best.language.name
                 n_letters = scripts["Latin"]
-                strength = float(best.value) * min(1.0, n_letters / 40)
+                strength = float(best.value) * min(1.0, n_letters / 25)
                 if name == "ENGLISH":  # English signage appears everywhere
                     strength *= 0.5
                 if strength > 0.15 and name in LANGUAGE_COUNTRIES:

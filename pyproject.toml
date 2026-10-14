@@ -13,6 +13,7 @@ dependencies = [
   "openvino>=2024.6",
   "numpy>=1.24",
   "pillow>=10",
+  "pillow-heif>=0.16",
   "fastapi>=0.110",
   "uvicorn>=0.27",
   "python-multipart>=0.0.9",

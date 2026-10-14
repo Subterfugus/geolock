@@ -32,3 +32,13 @@ def test_fusion_recovers_a_known_location(engine, lat, lon, code, monkeypatch):
     monkeypatch.setattr(engine, "geoclip_query", lambda e: q)
     g = engine.locate(Image.new("RGB", (640, 480)), use_ocr=False)["guesses"][0]
     assert g["country_code"] == code and haversine_km(g["lat"], g["lon"], lat, lon) < 25
+
+
+def test_posterior_is_normalised_and_temperature_spreads_it(engine):
+    from geolock.locenc import normalize
+    q = normalize(engine.loc_encoder(np.array([[48.85, 2.35]]))[0])
+    p_clip = np.full(len(engine.geo.country_codes), 1 / len(engine.geo.country_codes))
+    sharp, _, _ = engine.posterior(q, p_clip, [], temperature=1.0)
+    soft, _, _ = engine.posterior(q, p_clip, [], temperature=4.0)
+    assert np.exp(sharp).sum() == pytest.approx(1, abs=1e-6)
+    assert np.exp(soft).max() < np.exp(sharp).max()

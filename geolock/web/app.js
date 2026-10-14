@@ -68,7 +68,7 @@ drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
 drop.addEventListener("drop", (e) => {
   e.preventDefault(); drop.classList.remove("drag");
-  const f = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+  const f = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
   if (f) analyse(f);
 });
 $("#file").addEventListener("change", (e) => e.target.files[0] && analyse(e.target.files[0]));
@@ -92,7 +92,8 @@ async function analyse(file) {
     const r = await fetch("/api/locate", { method: "POST", body: fd });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || r.statusText);
-    const entry = { url, data, name: file.name || "pasted image" };
+    const entry = { url: data.preview || url, data, name: file.name || "pasted image" };
+    delete data.preview;
     history.unshift(entry);
     show(entry);
   } catch (err) {
@@ -232,7 +233,8 @@ function drawMap(d) {
     m.bindPopup(`<b>#${i + 1} ${esc(n.main)}</b><br>${esc(n.sub)}<br>${pct(g.confidence)} confidence · ±${Math.round(g.radius_km)} km<br>
       <small>${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}</small>`);
     m.on("click", () => { selected = i; renderGuesses(d); });
-    pts.push([g.lat, g.lon]);
+    // Frame only guesses that matter, so one stray low guess doesn't zoom out to the world.
+    if (i === 0 || g.confidence >= 0.25 * d.guesses[0].confidence) pts.push([g.lat, g.lon]);
   });
   if (d.exif_gps) {
     L.marker([d.exif_gps.lat, d.exif_gps.lon], { icon: L.divIcon({ className: "", html: `<div class="exif-pin" title="EXIF GPS">★</div>`, iconSize: [26, 26] }),

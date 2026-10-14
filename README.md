@@ -47,7 +47,8 @@ Linux/macOS: `./setup.sh` then `.venv/bin/python -m geolock`.
 
 ```bash
 geolock locate photo.jpg [--json] [--vlm]   # print guesses
-geolock eval ~/Pictures/trips               # accuracy on your own geotagged photos
+geolock eval ~/Pictures/trips --fit         # accuracy on your own geotagged photos,
+                                            # and tune confidence to match them
 geolock bench                               # model speed on this machine
 geolock --device NPU serve                  # pick a device (AUTO, GPU, NPU, CPU)
 ```
@@ -55,6 +56,10 @@ geolock --device NPU serve                  # pick a device (AUTO, GPU, NPU, CPU
 `geolock eval` hides each photo's EXIF GPS from the model, predicts, and reports how
 often it lands within 1 / 25 / 200 / 750 / 2500 km and whether the confidence levels are
 honest. It is the best way to see how well GeoLock does on the kind of photos you take.
+With `--fit` (20+ photos) it also tunes the fusion so the confidence numbers match how
+often it is actually right, and the app uses those settings from then on.
+
+HEIC photos from iPhones work too.
 
 ## How it works
 
