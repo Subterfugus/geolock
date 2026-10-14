@@ -51,6 +51,10 @@ WIDE = ["a landscape photo", "a photo of a street in a town", "a photo of buildi
         "a photo of a road", "a photo of a beach and the sea", "a photo of a forest",
         "a photo of mountains", "a photo of a river or lake", "a photo of a desert",
         "a photo of fields and farmland", "a photo of a park", "a photo of a coastline"]
+# --urban: only towns and cities (streets, buildings), closer to everyday photos.
+URBAN = ["a photo of a street in a town", "a photo of buildings", "a photo of a city",
+         "a photo of houses", "a photo of a road with cars", "a photo of a market",
+         "a photo of a village", "a photo of a church or temple", "a photo of a harbour with boats"]
 CLOSE = ["a close-up photo of a plant", "a close-up photo of a flower",
          "a close-up photo of an insect", "a photo of a bird", "a photo of an animal",
          "a photo of a mushroom", "a close-up photo of leaves", "a photo of a reptile",
@@ -137,16 +141,18 @@ def photo_url(c, size):
 class WideShotScorer:
     """P(wide outdoor shot) from CLIP ViT-L/14, the same model GeoLock uses."""
 
-    def __init__(self):
+    def __init__(self, keep=WIDE):
         import torch
         from transformers import CLIPModel, CLIPProcessor
         self.torch = torch
         self.model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").eval()
         self.proc = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
         with torch.no_grad():
-            t = self.proc(text=WIDE + CLOSE, return_tensors="pt", padding=True)
+            others = CLOSE + ([] if keep is WIDE else [p for p in WIDE if p not in keep])
+            t = self.proc(text=keep + others, return_tensors="pt", padding=True)
             e = self.model.text_projection(self.model.text_model(**t).pooler_output)
         self.text = (e / e.norm(dim=-1, keepdim=True)).numpy()
+        self.n_keep = len(keep)
 
     def __call__(self, images):
         with self.torch.no_grad():
@@ -157,7 +163,7 @@ class WideShotScorer:
         logits = 100 * e @ self.text.T
         p = np.exp(logits - logits.max(1, keepdims=True))
         p /= p.sum(1, keepdims=True)
-        return p[:, :len(WIDE)].sum(1)
+        return p[:, :self.n_keep].sum(1)
 
 
 def main():
@@ -168,6 +174,8 @@ def main():
     ap.add_argument("--per-country", type=int, default=4)
     ap.add_argument("--screen", type=int, default=6000, help="thumbnails to score with CLIP")
     ap.add_argument("--min-wide", type=float, default=0.7, help="CLIP wide-shot probability")
+    ap.add_argument("--urban", action="store_true",
+                    help="only photos taken in towns, of streets and buildings")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     a.folder.mkdir(parents=True, exist_ok=True)
@@ -181,6 +189,10 @@ def main():
         cands = stream_candidates(a.metadata, seed=a.seed)
         cache.write_text("\n".join(json.dumps(c) for c in cands))
     cands = [c for c in cands if c["license"] in LICENSES]
+    if a.urban:  # at least 5 GeoNames places (1000+ people) within 10 km
+        def town_count(c):
+            return len(geo.places_near(c["lat"], c["lon"], 10)[0])
+        cands = [c for c in cands if town_count(c) >= 5]
     ccodes = geo.countries.lookup(np.array([c["lat"] for c in cands]),
                                   np.array([c["lon"] for c in cands]))
     by_cc = defaultdict(list)
@@ -199,7 +211,7 @@ def main():
     log(f"scoring {len(screen):,} thumbnails with CLIP")
     with ThreadPoolExecutor(16) as ex:
         thumbs = list(ex.map(lambda c: fetch(photo_url(c, "small")), screen))
-    scorer = WideShotScorer()
+    scorer = WideShotScorer(URBAN if a.urban else WIDE)
     ok = [(c, t) for c, t in zip(screen, thumbs) if t]
     scores = []
     for i in range(0, len(ok), 32):
