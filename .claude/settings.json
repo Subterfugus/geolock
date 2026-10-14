@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)", "Bash(python3:*)", "Bash(.venv/bin/python:*)", "Bash(pip:*)",
+      "Bash(pytest:*)", "Bash(geolock:*)", "Bash(git:*)", "Bash(gh:*)", "Bash(curl:*)",
+      "Bash(npm:*)", "Bash(npx:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)",
+      "Bash(cp:*)", "Bash(mv:*)", "Bash(find:*)", "Bash(grep:*)", "Bash(sed:*)",
+      "Bash(head:*)", "Bash(tail:*)", "Bash(du:*)", "Bash(unzip:*)", "Bash(tar:*)",
+      "Edit", "Write", "Read", "WebFetch", "WebSearch"
+    ]
+  }
+}
