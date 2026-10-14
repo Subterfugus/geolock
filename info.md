@@ -19,7 +19,7 @@ confidence and the clues for each guess.
 |---|---|
 | Engine (CLIP + GeoCLIP on OpenVINO, fusion, clustering, refinement) | Built; **run with the real CLIP ViT-L/14 weights** (all tests pass) |
 | Clues: OCR + language, domains, phone codes, currency, mph, script, scene, EXIF time zone | Built and unit-tested |
-| Deep analysis with a local vision-language model | Built, **not yet run** (needs the laptop) |
+| Deep analysis with a local vision-language model | Built but **not part of the plan** (Brady, 2026-10-14): the Claude / ChatGPT second opinion covers this; never run |
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
@@ -145,7 +145,9 @@ Terms and limits (as understood on 2026-10-14; check the current terms yourself)
 - Photos sent this way are handled under Anthropic's or OpenAI's consumer terms for your
   account (including their data-use settings), not GeoLock's offline promise.
 
-**Deep analysis (optional).** Qwen2.5-VL-7B-Instruct (Apache-2.0), INT4, through
+**Deep analysis (optional, not part of the plan).** Brady decided on 2026-10-14 not to
+use a local vision-language model; the Claude / ChatGPT second opinion fills this role.
+The code stays but is not installed by default and is not tested. Qwen2.5-VL-7B-Instruct (Apache-2.0), INT4, through
 OpenVINO GenAI on the Arc GPU. It is asked for structured JSON: observations, driving
 side, text, country guesses. Those become clues at moderate weight. Expect seconds to
 tens of seconds per photo; smaller option: `setup_models --vlm Qwen/Qwen2-VL-2B-Instruct`.
@@ -306,8 +308,8 @@ about real-photo accuracy yet.
 **Not run yet (needs the laptop)**
 - ~~Real CLIP weights~~: now run on the build machine (see "Test sets and results").
   Accuracy on everyday photos still needs `geolock testset` + `eval` on the laptop.
-- Deep analysis (Qwen2.5-VL-7B via OpenVINO GenAI). The code follows the current GenAI
-  API, and pip resolves its dependencies, but the model has never been loaded.
+- Deep analysis (Qwen2.5-VL-7B via OpenVINO GenAI): never loaded, and dropped from the
+  plan (see "Deep analysis").
 - ~~`setup.ps1` on Windows~~: done (desktop PC). Speed on the Arc GPU and NPU still
   needs the laptop.
 
@@ -350,6 +352,10 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: Local vision-language model dropped from the plan (Brady's call); the
+  Claude / ChatGPT second opinion is the deep-analysis path. A Qwen2.5-VL-7B test on the
+  desktop was stopped before it ran.
 
 - **2026-10-14**: First run on real Windows (desktop PC). `setup.ps1` works; fixes:
   the Arabic OCR model needs `python-bidi` (now `rapidocr[rtl]`), `setup.ps1` stops if
