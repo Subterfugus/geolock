@@ -50,6 +50,8 @@ Linux/macOS: `./setup.sh` then `.venv/bin/python -m geolock`.
 geolock locate photo.jpg [--json] [--vlm]   # print guesses
 geolock eval ~/Pictures/trips --fit         # accuracy on your own geotagged photos,
                                             # and tune confidence to match them
+geolock testset data/testset                # download ~300 openly licensed geotagged
+geolock eval data/testset --fit             # photos from around the world, then test
 geolock bench                               # model speed on this machine
 geolock --device NPU serve                  # pick a device (AUTO, GPU, NPU, CPU)
 ```
@@ -59,6 +61,13 @@ often it lands within 1 / 25 / 200 / 750 / 2500 km and whether the confidence le
 honest. It is the best way to see how well GeoLock does on the kind of photos you take.
 With `--fit` (20+ photos) it also tunes the fusion so the confidence numbers match how
 often it is actually right, and the app uses those settings from then on.
+
+No geotagged photos of your own? `geolock testset <folder>` downloads a world-spread set
+from Wikimedia Commons (random towns in every country, maps and scans skipped), with a
+`labels.csv` of true locations and an `ATTRIBUTION.md` of each photo's author and licence.
+`geolock eval` uses `labels.csv` when a folder has one. Re-running `testset` tops the
+folder up. `tools/build_inat_testset.py` builds a similar set from iNaturalist's open data
+when Commons is out of reach.
 
 HEIC photos from iPhones work too.
 

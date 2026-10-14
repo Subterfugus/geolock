@@ -53,8 +53,15 @@ def cmd_locate(a):
                 print(f"  clue: {c['title']} — {c['detail']}")
 
 
+def _truth_labels(folder):
+    """labels.csv in the folder (from `geolock testset`), if any: {relative path: (lat, lon)}."""
+    from .testset import read_labels
+    return {r["file"]: (float(r["lat"]), float(r["lon"])) for r in read_labels(folder)}
+
+
 def cmd_eval(a):
-    """Accuracy on your own geotagged photos (their EXIF GPS is the ground truth).
+    """Accuracy on geotagged photos: a labels.csv in the folder (as written by
+    `geolock testset`) gives the true locations, otherwise the photos' EXIF GPS does.
 
     With --fit, also searches the fusion settings (GeoCLIP temperature and the weight of
     CLIP's country classifier) that make the confidence numbers most honest on these
@@ -64,15 +71,18 @@ def cmd_eval(a):
     from .geodata import haversine_km
     eng = _engine(a)
     files = sorted(p for p in Path(a.folder).rglob("*") if p.suffix.lower() in IMAGE_EXT)
+    labels = _truth_labels(a.folder)
     thresholds = [1, 25, 200, 750, 2500]
-    errs, conf, country_ok, cases = [], [], 0, []
+    errs, conf, country_ok, cases, rows = [], [], 0, [], []
     for p in files:
         try:
             im, meta = eng.open_image(p)
         except Exception as e:
             print(f"   skip  {p.name}: {e}")
             continue
-        truth = meta.get("gps")
+        rel = p.relative_to(a.folder).as_posix()
+        truth = ({"lat": labels[rel][0], "lon": labels[rel][1]} if rel in labels
+                 else meta.get("gps"))
         if not truth:
             continue
         r = eng.locate(im, use_ocr=not a.no_ocr, use_vlm=a.vlm, use_exif_gps=False, keep_evidence=a.fit)
@@ -80,6 +90,10 @@ def cmd_eval(a):
         e = float(haversine_km(g["lat"], g["lon"], truth["lat"], truth["lon"]))
         tc = eng.geo.describe(truth["lat"], truth["lon"])["country_code"]
         country_ok += int(tc == g.get("country_code"))
+        rows.append({"file": rel, "true_lat": truth["lat"], "true_lon": truth["lon"],
+                     "true_country": tc, "guess_lat": round(g["lat"], 5),
+                     "guess_lon": round(g["lon"], 5), "guess_country": g.get("country_code"),
+                     "error_km": round(e, 1), "confidence": round(g["confidence"], 4)})
         errs.append(e)
         conf.append(g["confidence"])
         if a.fit:
@@ -89,7 +103,7 @@ def cmd_eval(a):
         print(f"{e:8.1f} km  conf {g['confidence']:.0%}  {p.name}")
     n = len(errs)
     if not n:
-        sys.exit("No photos with EXIF GPS found.")
+        sys.exit("No photos with a known location (labels.csv or EXIF GPS) found.")
     errs = np.array(errs)
     print(f"\n{n} photos.  Median error {np.median(errs):.0f} km.  Country accuracy {country_ok / n:.0%}")
     for t in thresholds:
@@ -101,6 +115,13 @@ def cmd_eval(a):
         if m.any():
             print(f"  said {lo:.0%}-{min(hi, 1):.0%} confident: {m.sum()} photos, actually within "
                   f"{a.cluster_km:.0f} km {np.mean(errs[m] <= a.cluster_km):.0%} of the time")
+    if a.csv:
+        import csv
+        with open(a.csv, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+        print(f"  per-photo results saved to {a.csv}")
     if a.fit:
         _fit(eng, cases, a)
 
@@ -173,6 +194,14 @@ def main(argv=None):
     s.add_argument("--cluster-km", type=float, default=250.0)
     s.add_argument("--fit", action="store_true",
                    help="tune the fusion settings on these photos and save them")
+    s.add_argument("--csv", metavar="PATH", help="save per-photo results to a CSV file")
+    s = sub.add_parser("testset", help="download an openly licensed geotagged test set")
+    s.add_argument("folder")
+    s.add_argument("-n", type=int, default=300, help="number of photos (default 300)")
+    s.add_argument("--per-country", type=int, default=4, help="at most this many per country")
+    s.add_argument("--radius-km", type=float, default=10.0,
+                   help="search radius around each random town")
+    s.add_argument("--seed", type=int, default=0)
     s = sub.add_parser("bench", help="time the models on this machine")
     s.add_argument("-n", type=int, default=10)
     a = ap.parse_args(argv)
@@ -180,6 +209,9 @@ def main(argv=None):
         if a.cmd is None:
             a.host, a.port, a.no_browser = "127.0.0.1", 7860, False
         cmd_serve(a)
+    elif a.cmd == "testset":
+        from .testset import main as testset_main
+        testset_main(a)
     else:
         {"locate": cmd_locate, "eval": cmd_eval, "bench": cmd_bench}[a.cmd](a)
 
