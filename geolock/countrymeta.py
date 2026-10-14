@@ -78,6 +78,35 @@ LANGUAGE_COUNTRIES = {
     "XHOSA": {"ZA": 1},
     "YORUBA": {"NG": 1, "BJ": 0.5},
     "ZULU": {"ZA": 1},
+    # Non-Latin scripts (read by the extra OCR models)
+    "RUSSIAN": {"RU": 1, "BY": 0.8, "KZ": 0.7, "KG": 0.6, "UA": 0.3, "MD": 0.3,
+                "UZ": 0.3, "TJ": 0.3, "TM": 0.3, "LV": 0.2, "EE": 0.2, "AM": 0.2, "GE": 0.2},
+    "UKRAINIAN": {"UA": 1},
+    "BELARUSIAN": {"BY": 1},
+    "BULGARIAN": {"BG": 1},
+    "SERBIAN": {"RS": 1, "BA": 0.6, "ME": 0.6, "XK": 0.3},
+    "MACEDONIAN": {"MK": 1},
+    "KAZAKH": {"KZ": 1},
+    "MONGOLIAN": {"MN": 1},
+    "GREEK": {"GR": 1, "CY": 1},
+    "ARABIC": {"SA": 1, "AE": 1, "EG": 1, "MA": 1, "DZ": 1, "TN": 1, "LY": 1, "JO": 1,
+               "IQ": 1, "SY": 1, "LB": 1, "OM": 1, "YE": 1, "KW": 1, "QA": 1, "BH": 1,
+               "SD": 1, "MR": 1, "PS": 1, "IL": 0.3, "TD": 0.4},
+    "PERSIAN": {"IR": 1, "AF": 1, "TJ": 0.2},
+    "URDU": {"PK": 1, "IN": 0.2},
+    "HEBREW": {"IL": 1},
+    "HINDI": {"IN": 1, "NP": 0.4},
+    "MARATHI": {"IN": 1},
+    "BENGALI": {"BD": 1, "IN": 0.5},
+    "TAMIL": {"IN": 0.6, "LK": 1, "SG": 0.3, "MY": 0.2},
+    "TELUGU": {"IN": 1},
+    "GUJARATI": {"IN": 1},
+    "PUNJABI": {"IN": 1, "PK": 0.5},
+    "THAI": {"TH": 1},
+    "KOREAN": {"KR": 1, "KP": 1},
+    "JAPANESE": {"JP": 1},
+    "GEORGIAN": {"GE": 1},
+    "ARMENIAN": {"AM": 1},
 }
 
 # Writing system -> {iso2: weight}. Latin is everywhere, so it carries no evidence.
@@ -103,6 +132,9 @@ SCRIPT_COUNTRIES = {
     "Chinese characters": {"CN": 1, "TW": 1, "HK": 1, "MO": 1, "SG": 0.6, "JP": 0.4},
     "Ethiopic": {"ET": 1, "ER": 1},
     "Sinhala": {"LK": 1},
+    "Telugu": {"IN": 1},
+    "Gujarati": {"IN": 1},
+    "Gurmukhi": {"IN": 1, "PK": 0.3},
 }
 
 # Country-code top-level domains whose code differs from ISO alpha-2.

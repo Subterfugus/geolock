@@ -74,9 +74,16 @@ the heavy model runs once per photo (4 crops in one batch, fixed shape so it als
 compiles for the NPU). Text prompts are embedded at setup, so the runtime does not need
 the CLIP text encoder.
 
-**OCR.** RapidOCR (PP-OCRv3) reads Latin and Chinese text. Umlauts and accents are often
-dropped, which the language detector tolerates. Other scripts are covered by CLIP's
-script detector and the VLM.
+**OCR.** RapidOCR on the OpenVINO engine. The default PP-OCRv6 model reads Latin (with
+accents), Chinese and Japanese. Setup also downloads PP-OCRv5 models for Cyrillic, Greek,
+Korean, Thai, Arabic, Devanagari, Tamil and Telugu (about 10-15 MB each). An extra model
+runs when CLIP thinks it sees that script, or when the default model finds text it
+can't read; for each text region the most confident reading wins. The characters read
+then give a script clue (Hangul means Korea, Greek means Greece or Cyprus) and, for
+scripts many languages share, a language clue: Russian vs Ukrainian vs Bulgarian vs
+Serbian, Arabic vs Persian vs Urdu, Hindi vs Marathi. The app never downloads at run
+time; a script whose model is missing falls back to CLIP's script detector. The text
+angle classifier is off: it flipped long upright lines and garbled them.
 
 **Deep analysis (optional).** Qwen2.5-VL-7B-Instruct (Apache-2.0), INT4, through
 OpenVINO GenAI on the Arc GPU. It is asked for structured JSON: observations, driving
@@ -144,8 +151,11 @@ about real-photo accuracy yet.
 - Confidence numbers are uncalibrated. With strong visual matches GeoCLIP's softmax is
   very peaked, so it may say 95 %+ too easily. Fixed in this pass by `eval --fit`, which
   learns the right settings from your own photos (see below).
-- OCR only reads Latin and Chinese text and drops accents. Cyrillic, Arabic, Thai,
-  Hangul and others rely on CLIP's rough script detector unless deep analysis is on.
+- ~~OCR only reads Latin and Chinese text and drops accents.~~ Fixed: see the OCR
+  section. Still not read by OCR: Hebrew, Georgian, Armenian, Bengali, Khmer, Lao,
+  Burmese, Ethiopic, Sinhala (no PaddleOCR model); those rely on CLIP and the VLM. The
+  extra models could not be downloaded on the build machine, so only the default model
+  has actually been run.
 - Driving side is only detected by the VLM. CLIP can't see it reliably.
 - Clue strengths and the country tables are hand-set. Reasonable, but untested.
 - Place names come from GeoNames' list of places with 1000+ people, which sometimes names
@@ -166,8 +176,7 @@ about real-photo accuracy yet.
    else depends on these numbers.
 2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
    recognisable.
-3. Multilingual OCR (PaddleOCR has Cyrillic, Arabic, Korean, Japanese, Devanagari and
-   other models), to read signs without the VLM.
+3. ~~Multilingual OCR~~ (done, see the changelog).
 4. A denser location gallery outside Europe and North America, where GeoCLIP's 100k
    points are thin.
 5. Sun direction: shadows plus the EXIF time give latitude and orientation hints.
@@ -175,6 +184,10 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: Multi-script OCR. RapidOCR 3 (PP-OCRv6 default + PP-OCRv5 Cyrillic,
+  Greek, Korean, Thai, Arabic, Devanagari, Tamil, Telugu) on OpenVINO; script and
+  language clues for all of them; angle classifier off (it garbled upright lines).
 
 - **2026-10-14**: Audit (above). Added HEIC support, `eval --fit` calibration, tighter
   map framing, shorter-text language detection, and a `.claude/settings.json` that

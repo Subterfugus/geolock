@@ -35,7 +35,8 @@ Linux/macOS: `./setup.sh` then `.venv/bin/python -m geolock`.
 - **Confidence** for each guess: the share of the model's probability that falls within
   ~250 km of it. High ≥ 50 %, medium ≥ 20 %, low below that.
 - **Country odds**, with CLIP's opinion alone on hover.
-- **Clues**: text read in the photo and its language, web domains, phone prefixes,
+- **Clues**: text read in the photo (Latin, Cyrillic, Greek, Chinese, Japanese, Korean,
+  Thai, Arabic, Devanagari, Tamil, Telugu) and its language, web domains, phone prefixes,
   currency signs, mph signs, writing system, architecture and road-marking hints, EXIF
   time zone, and with deep analysis the model's own observations (driving side, plates,
   bollards, vegetation and so on). Each guess lists which clues back it (✓) or argue

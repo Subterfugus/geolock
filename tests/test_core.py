@@ -89,3 +89,40 @@ def test_heic_photos_open(tmp_path):
     p = tmp_path / "x.heic"
     Image.new("RGB", (64, 48), (200, 10, 10)).save(p)
     assert Image.open(p).size == (64, 48)
+
+
+@pytest.mark.parametrize("text,script,lang,code", [
+    ("Аптека Продукты Улица Ленина Магазин", "Cyrillic", "RUSSIAN", "RU"),
+    ("Аптека Продукти Вулиця Шевченка відчинено", "Cyrillic", "UKRAINIAN", "UA"),
+    ("Φαρμακείο Οδός Αθηνών Ταβέρνα", "Greek", None, "GR"),
+    ("편의점 서울역 출구", "Korean Hangul", None, "KR"),
+    ("ร้านกาแฟ ถนนสุขุมวิท", "Thai", None, "TH"),
+])
+def test_non_latin_script_and_language_clues(text, script, lang, code):
+    clues = TextReader().clues([{"text": text, "score": 0.9, "box": [], "model": "x"}])
+    s = [c for c in clues if c.kind == "script"]
+    assert s and s[0].title.startswith(script) and s[0].countries.get(code, 0) >= 1
+    if lang:
+        l = [c for c in clues if c.kind == "language"]
+        assert l and l[0].countries is __import__("geolock.countrymeta").countrymeta.LANGUAGE_COUNTRIES[lang]
+
+
+def test_kana_suppresses_chinese_clue():
+    clues = TextReader().clues([{"text": "コンビニ 東京駅 出口", "score": 0.9, "box": []}])
+    titles = [c.title for c in clues if c.kind == "script"]
+    assert titles == ["Japanese text"]
+
+
+def test_best_model_wins_per_region(monkeypatch):
+    """Two models read the same sign; the confident reading is kept, others merged in."""
+    r = TextReader()
+    box = [[10, 10], [200, 10], [200, 40], [10, 40]]
+    other = [[10, 100], [200, 100], [200, 130], [10, 130]]
+    runs = {"default": [{"text": "A", "score": 0.4, "box": box, "model": "default"},
+                        {"text": "EXIT", "score": 0.99, "box": other, "model": "default"}],
+            "Cyrillic": [{"text": "Аптека", "score": 0.97, "box": box, "model": "Cyrillic"}]}
+    monkeypatch.setattr(TextReader, "ocr", object())
+    monkeypatch.setattr(TextReader, "_run", staticmethod(lambda eng, arr, s, script: runs[script]))
+    monkeypatch.setattr(r, "extra", lambda s: object() if s == "Cyrillic" else None)
+    lines = r.read(Image.new("RGB", (300, 200)), script_hints={"Cyrillic": 0.6})
+    assert sorted(l["text"] for l in lines) == ["EXIT", "Аптека"]
