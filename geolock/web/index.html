@@ -28,6 +28,13 @@
   <div id="options">
     <label><input type="checkbox" id="opt-ocr" checked> Read text in the photo</label>
     <label id="vlm-label" title="Uses the local vision-language model; slower but reads any script and explains more."><input type="checkbox" id="opt-vlm"> Deep analysis (vision-language model)</label>
+    <div id="ask-row">
+      <span class="ask-title">Second opinion, with your own login:</span>
+      <label id="ask-claude-label" class="ask"><input type="checkbox" id="ask-claude" data-provider="claude"> Ask Claude</label>
+      <label id="ask-chatgpt-label" class="ask"><input type="checkbox" id="ask-chatgpt" data-provider="chatgpt"> Ask ChatGPT</label>
+      <label class="ask small" title="Off: the analyst sees only the photo, for a fully independent opinion."><input type="checkbox" id="opt-share" checked> Share GeoLock's findings</label>
+      <div id="ask-note" class="small" hidden>Sends the photo (without its metadata, so no GPS) to Anthropic or OpenAI, using your Claude or ChatGPT plan.</div>
+    </div>
     <label title="If the photo has GPS in its metadata, show it on the map for comparison."><input type="checkbox" id="opt-exif" checked> Show EXIF GPS if present</label>
   </div>
 
@@ -38,6 +45,7 @@
     <div id="best"></div>
     <h2>All guesses</h2>
     <ol id="guesses"></ol>
+    <div id="analysts"></div>
     <h2>Country</h2>
     <div id="countries"></div>
     <h2>Clues</h2>
@@ -52,7 +60,7 @@
     <div id="history"></div>
   </section>
 
-  <footer>Everything runs on this computer. Basemap © Natural Earth.</footer>
+  <footer id="footer">Everything runs on this computer unless you ask Claude or ChatGPT. Basemap © Natural Earth.</footer>
 </aside>
 <main id="map"></main>
 <script src="/static/vendor/leaflet.js"></script>

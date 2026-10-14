@@ -33,7 +33,8 @@ def cmd_serve(a):
 def cmd_locate(a):
     eng = _engine(a)
     for path in a.images:
-        r = eng.locate(path, use_ocr=not a.no_ocr, use_vlm=a.vlm)
+        r = eng.locate(path, use_ocr=not a.no_ocr, use_vlm=a.vlm, ask=a.ask or (),
+                       share_local=not a.no_share_local)
         if a.json:
             r.pop("heat", None)
             print(json.dumps(r, indent=2, ensure_ascii=False))
@@ -48,6 +49,14 @@ def cmd_locate(a):
             print(f"  {i}. {g['confidence']:6.1%} {g['label']:6}  {g['lat']:.4f}, {g['lon']:.4f}  "
                   f"±{g['radius_km']:.0f} km  near {where}")
         print("  Countries: " + ", ".join(f"{c['name']} {c['prob']:.0%}" for c in r["countries"][:5]))
+        for an in r.get("analysts", []):
+            if not an["ok"]:
+                print(f"  {an['name']}: failed: {an['error']}")
+                continue
+            print(f"  {an['name']} ({an['via']}, {an['ms'] / 1000:.0f} s): {an['reasoning']}")
+            for g in an["guesses"]:
+                print(f"    {g['confidence']:6.1%}  {g['lat']:.4f}, {g['lon']:.4f}  ±{g['radius_km']:.0f} km  "
+                      f"{', '.join(x for x in (g['place'], g['country']) if x)}")
         for c in r["clues"]:
             if c["strength"] > 0:
                 print(f"  clue: {c['title']} — {c['detail']}")
@@ -74,6 +83,7 @@ def cmd_eval(a):
     labels = _truth_labels(a.folder)
     thresholds = [1, 25, 200, 750, 2500]
     errs, conf, country_ok, cases, rows = [], [], 0, [], []
+    llm_errs = {}  # analyst name -> error of its own top guess, to compare with the fused one
     for p in files:
         try:
             im, meta = eng.open_image(p)
@@ -85,9 +95,14 @@ def cmd_eval(a):
                  else meta.get("gps"))
         if not truth:
             continue
-        r = eng.locate(im, use_ocr=not a.no_ocr, use_vlm=a.vlm, use_exif_gps=False, keep_evidence=a.fit)
+        r = eng.locate(im, use_ocr=not a.no_ocr, use_vlm=a.vlm, use_exif_gps=False, keep_evidence=a.fit,
+                       ask=a.ask or (), share_local=not a.no_share_local)
         g = r["guesses"][0]
         e = float(haversine_km(g["lat"], g["lon"], truth["lat"], truth["lon"]))
+        for an in r.get("analysts", []):
+            ag = an["guesses"][0] if an["ok"] else None
+            llm_errs.setdefault(an["name"], []).append(
+                float(haversine_km(ag["lat"], ag["lon"], truth["lat"], truth["lon"])) if ag else np.inf)
         tc = eng.geo.describe(truth["lat"], truth["lon"])["country_code"]
         country_ok += int(tc == g.get("country_code"))
         rows.append({"file": rel, "true_lat": truth["lat"], "true_lon": truth["lon"],
@@ -108,6 +123,11 @@ def cmd_eval(a):
     print(f"\n{n} photos.  Median error {np.median(errs):.0f} km.  Country accuracy {country_ok / n:.0%}")
     for t in thresholds:
         print(f"  within {t:>5} km: {np.mean(errs <= t):.0%}")
+    for name, le in llm_errs.items():
+        le = np.array(le)
+        print(f"  {name} alone (its top guess; failures count as misses): "
+              + ", ".join(f"{t} km {np.mean(le <= t):.0%}" for t in thresholds)
+              + f", median {np.median(le):.0f} km")
     conf = np.array(conf)
     print(f"  (settings: temperature {eng.temperature}, country weight {eng.country_weight})")
     for lo, hi in ((0, .2), (.2, .5), (.5, 1.01)):
@@ -169,6 +189,21 @@ def cmd_bench(a):
     print(f"Full pipeline: {(time.perf_counter() - t) * 1000:.0f} ms  {r['timings']}")
 
 
+def cmd_analysts(a):
+    from .analyst import detect
+    for key, st in detect(refresh=True).items():
+        mark = "ready" if st["available"] else "not available"
+        print(f"{key:8} {mark:14} {st['detail']}")
+
+
+def _ask_args(s):
+    s.add_argument("--ask", action="append", choices=["claude", "chatgpt"],
+                   help="also ask Claude or ChatGPT with your own login (repeatable; "
+                        "sends the photo without its metadata)")
+    s.add_argument("--no-share-local", action="store_true",
+                   help="don't tell the analyst what GeoLock found (blind second opinion)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="geolock", description="Offline photo geolocation")
     ap.add_argument("--models-dir", type=Path, default=MODELS_DIR)
@@ -187,10 +222,12 @@ def main(argv=None):
     s.add_argument("--json", action="store_true")
     s.add_argument("--no-ocr", action="store_true")
     s.add_argument("--vlm", action="store_true", help="use the vision-language model")
+    _ask_args(s)
     s = sub.add_parser("eval", help="measure accuracy on a folder of geotagged photos")
     s.add_argument("folder")
     s.add_argument("--no-ocr", action="store_true")
     s.add_argument("--vlm", action="store_true")
+    _ask_args(s)
     s.add_argument("--cluster-km", type=float, default=250.0)
     s.add_argument("--fit", action="store_true",
                    help="tune the fusion settings on these photos and save them")
@@ -202,6 +239,7 @@ def main(argv=None):
     s.add_argument("--radius-km", type=float, default=10.0,
                    help="search radius around each random town")
     s.add_argument("--seed", type=int, default=0)
+    sub.add_parser("analysts", help="check whether Claude / ChatGPT can be asked from here")
     s = sub.add_parser("bench", help="time the models on this machine")
     s.add_argument("-n", type=int, default=10)
     a = ap.parse_args(argv)
@@ -213,7 +251,7 @@ def main(argv=None):
         from .testset import main as testset_main
         testset_main(a)
     else:
-        {"locate": cmd_locate, "eval": cmd_eval, "bench": cmd_bench}[a.cmd](a)
+        {"locate": cmd_locate, "eval": cmd_eval, "bench": cmd_bench, "analysts": cmd_analysts}[a.cmd](a)
 
 
 if __name__ == "__main__":

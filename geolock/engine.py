@@ -85,6 +85,9 @@ class Geolocator:
                                else self.calibration.get("country_weight", 0.5))
         self.temperature = (temperature if temperature is not None
                             else self.calibration.get("temperature", 1.0))
+        # Share of the final answer given to Claude / ChatGPT when asked (their stated
+        # confidences are honoured within that share).
+        self.analyst_weight = float(self.calibration.get("analyst_weight", 0.75))
         self.cluster_km = cluster_km
         self.geo = GeoData()
         self.reader = TextReader()
@@ -274,18 +277,93 @@ class Geolocator:
                 log_post = log_post + np.log((1 - c.strength) + c.strength * c.point_fn(self.gps[:, 0], self.gps[:, 1]))
         return log_post - np.log(np.exp(log_post - log_post.max()).sum()) - log_post.max(), log_geo, country_ll
 
+    def briefing(self, ev, meta):
+        """A short text summary of the local evidence for an outside analyst (never EXIF GPS)."""
+        log_post, _, _ = self.posterior(ev["q"], ev["p_country_clip"], ev["clues"])
+        post = np.exp(log_post)
+        lines = ["Top guesses (from visual similarity and the clues below):"]
+        for i, g in enumerate(self._guesses(post, post, ev["q"], None, ev["clues"], 3, refine=False), 1):
+            d = self.geo.describe(g["lat"], g["lon"])
+            place = (d.get("place") or {}).get("name")
+            where = ", ".join(x for x in (place, d.get("region"), d.get("country")) if x)
+            lines.append(f"{i}. {where} ({g['lat']:.2f}, {g['lon']:.2f}), {g['confidence']:.0%}")
+        n_c = len(self.geo.country_codes)
+        mass = np.bincount(np.where(self.gal_country >= 0, self.gal_country, n_c),
+                           weights=post, minlength=n_c + 1)[:n_c]
+        top = [i for i in np.argsort(-mass)[:5] if mass[i] > 0.01]
+        if top:
+            lines.append("Countries: " + ", ".join(
+                f"{self.geo.country_names[i]} {mass[i]:.0%}" for i in top))
+        text = " | ".join(l["text"] for l in ev["ocr"][:25] if l.get("text"))
+        if text:
+            lines.append(f"Text read by OCR (may contain errors): {text[:600]}")
+        shown = [c for c in ev["clues"] if c.strength > 0 and c.kind not in ("claude", "chatgpt")]
+        if shown:
+            lines.append("Clues:")
+            lines += [f"- {c.title}" + (f": {c.detail}" if c.detail else "") for c in shown[:10]]
+        scene = ", ".join(s["value"] for s in ev["scene"] if s["prob"] >= 0.4)
+        if scene:
+            lines.append(f"Scene (CLIP): {scene}")
+        if meta.get("datetime"):
+            lines.append(f"Taken (camera clock): {meta['datetime']}")
+        return "\n".join(lines)
+
+    def mix_analysts(self, post, clues):
+        """Blend outside analysts' answers into the posterior as a mixture.
+
+        A product of likelihoods lets a sharply peaked GeoCLIP prior drown out a confident,
+        correct answer from Claude or ChatGPT, so instead:
+            final = (1 - w) * local + w * mean over analysts of their own distribution,
+        where an analyst's distribution puts each guess's stated probability in a bump of
+        its stated radius around it, and the probability it did not assign follows the local
+        posterior. Returns (final, the part of it sitting in the analysts' bumps)."""
+        mixers = [c for c in clues if c.mix > 0 and c.spots]
+        if not mixers:
+            return post, None
+        spots = np.zeros_like(post)
+        rest = 0.0
+        for c in mixers:
+            left = 1.0
+            for lat, lon, r, p in c.spots:
+                sig = min(max(r, 25.0), 1500.0)  # the gallery is ~40 km apart: no narrower
+                d = haversine_km(lat, lon, self.gps[:, 0], self.gps[:, 1])
+                b = np.exp(-0.5 * (d / sig) ** 2)
+                if b.sum() < 1e-9:  # no gallery point near it: use the closest one
+                    b = np.zeros_like(post)
+                    b[int(np.argmin(d))] = 1.0
+                spots += p * b / b.sum() / len(mixers)
+                left -= p
+            rest += max(left, 0.0) / len(mixers)
+        w = self.analyst_weight
+        final = (1 - w) * post + w * (spots + rest * post)
+        return final / final.sum(), w * spots
+
     def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
-               keep_evidence=False):
+               keep_evidence=False, ask=(), share_local=True):
+        """ask: analysts to consult ("claude", "chatgpt"); see geolock/analyst.py."""
         t0 = time.perf_counter()
         timings = {}
         im, meta = self.open_image(image)
         codes = self.geo.country_codes
         n_c = len(codes)
         ev = self.evidence(im, meta, use_ocr, use_vlm, timings)
+        analysts = []
+        if ask:
+            from .analyst import analyst_clues, ask_all
+            t = time.perf_counter()
+            analysts = ask_all(ask, im, self.briefing(ev, meta) if share_local else None)
+            for a in analysts:
+                ev["clues"] += analyst_clues(a, codes, self.geo.country_name)
+                for g in a.get("guesses", []):
+                    if use_exif_gps and meta.get("gps"):
+                        g["km_from_exif"] = round(float(haversine_km(
+                            g["lat"], g["lon"], meta["gps"]["lat"], meta["gps"]["lon"])), 1)
+            timings["llm_ms"] = round((time.perf_counter() - t) * 1000)
         q, p_country_clip, clues = ev["q"], ev["p_country_clip"], ev["clues"]
         scene, ocr_lines, vlm_raw = ev["scene"], ev["ocr"], ev["vlm_raw"]
         log_post, log_geo, country_ll = self.posterior(q, p_country_clip, clues)
         post = np.exp(log_post)
+        post, spot_part = self.mix_analysts(post, clues)
         p_geo = np.exp(log_geo)
 
         # country distribution
@@ -299,7 +377,7 @@ class Geolocator:
 
         # 4. cluster into guesses, refine, describe
         t = time.perf_counter()
-        guesses = self._guesses(post, p_geo, q, country_ll, clues, top_k)
+        guesses = self._guesses(post, p_geo, q, country_ll, clues, top_k, spot_part=spot_part)
         for g in guesses:
             g.update(self.geo.describe(g["lat"], g["lon"]))
             g["why"] = self._explain(g, clues, p_country_clip)
@@ -321,6 +399,7 @@ class Geolocator:
             "scene": scene,
             "ocr": ocr_lines[:40],
             "vlm_raw": vlm_raw,
+            "analysts": analysts,
             "heat": heat,
             "device": self.device,
             "timings": timings,
@@ -335,11 +414,12 @@ class Geolocator:
         return result
 
     # ------------------------------------------------------------- internals
-    def _guesses(self, post, p_geo, q, country_ll, clues, top_k):
+    def _guesses(self, post, p_geo, q, country_ll, clues, top_k, refine=True, spot_part=None):
         # Work on the points that carry nearly all the mass; the rest cannot matter.
         order = np.argsort(-post)
         keep = order[:max(2000, int(np.searchsorted(np.cumsum(post[order]), 0.995)) + 1)][:20000]
         lat, lon, w_all, g_all = self.gps[keep, 0], self.gps[keep, 1], post[keep], p_geo[keep]
+        s_all = spot_part[keep] if spot_part is not None else np.zeros(len(keep))
         remaining = np.ones(len(keep), dtype=bool)
         cand = np.arange(min(300, len(keep)))  # seeds come from the strongest points
         out = []
@@ -358,7 +438,9 @@ class Geolocator:
                 break
             core = members & (d <= self.cluster_km / 2)
             clat, clon = lat[seed], lon[seed]
-            rlat, rlon = self._refine(clat, clon, q, country_ll, clues, lat[core], lon[core], w_all[core])
+            frac = float(s_all[members].sum()) / max(mass, 1e-12)  # share from Claude / ChatGPT
+            rlat, rlon = (self._refine(clat, clon, q, country_ll, clues, lat[core], lon[core], w_all[core], frac)
+                          if refine else (float(clat), float(clon)))
             dm = haversine_km(rlat, rlon, lat[members], lon[members])
             w = w_all[members] / w_all[members].sum()
             o = np.argsort(dm)
@@ -375,7 +457,7 @@ class Geolocator:
         # broader area elsewhere adds up to more probability.
         return out
 
-    def _refine(self, clat, clon, q, country_ll, clues, mlat, mlon, mpost):
+    def _refine(self, clat, clon, q, country_ll, clues, mlat, mlon, mpost, frac=0.0):
         """Score a local cloud of candidate coordinates with the continuous encoder."""
         rng = np.random.default_rng(0)
         spread = max(15.0, float(np.average(haversine_km(clat, clon, mlat, mlon), weights=mpost)))
@@ -388,8 +470,12 @@ class Geolocator:
         if len(plat) > 600:
             keep = rng.choice(len(plat), 600, replace=False)
             plat, plon = plat[keep], plon[keep]
-        cand_lat = np.concatenate([[clat], clat + dlat, plat, mlat])
-        cand_lon = np.concatenate([[clon], (clon + dlon + 180) % 360 - 180, plon, mlon])
+        # exact points named by an analyst (Claude, ChatGPT) near this guess
+        spots = [sp for c in clues if c.mix > 0 for sp in c.spots
+                 if haversine_km(clat, clon, sp[0], sp[1]) <= self.cluster_km / 2]
+        anchors = np.array([sp[:2] for sp in spots], dtype=np.float64).reshape(-1, 2)
+        cand_lat = np.concatenate([[clat], clat + dlat, plat, mlat, anchors[:, 0]])
+        cand_lon = np.concatenate([[clon], (clon + dlon + 180) % 360 - 180, plon, mlon, anchors[:, 1]])
         cand_lat = np.clip(cand_lat, -89.9, 89.9)
         feats = normalize(self.loc_encoder(np.stack([cand_lat, cand_lon], 1)))
         score = self.geo_logits(q, feats)
@@ -400,6 +486,11 @@ class Geolocator:
             if c.point_fn is not None and c.strength > 0:
                 score += np.log((1 - c.strength) + c.strength * c.point_fn(cand_lat, cand_lon))
         w = _softmax(score)
+        if frac > 0 and spots:  # same mixture as mix_analysts, on these candidates
+            b = sum(p * np.exp(-0.5 * (haversine_km(la, lo, cand_lat, cand_lon) / max(r, 3.0)) ** 2)
+                    for la, lo, r, p in spots)
+            if b.sum() > 0:
+                w = (1 - frac) * w + frac * b / b.sum()
         top = np.argsort(-w)[:8]
         rlat, rlon = weighted_center(cand_lat[top], cand_lon[top], w[top])
         if haversine_km(rlat, rlon, clat, clon) > self.cluster_km / 2:
@@ -416,6 +507,10 @@ class Geolocator:
             why.append({"effect": 1 if rank <= 3 else (0 if rank <= 10 else -1),
                         "text": f"CLIP's country classifier ranks {g['country']} #{rank} ({p_clip[idx]:.0%})."})
         for c in clues:
+            if c.mix > 0 and c.point_fn is not None:
+                like = float(c.point_fn(g["lat"], g["lon"]))
+                why.append({"effect": 1 if like > 0.5 else -1 if like < 0.05 else 0, "text": c.title})
+                continue
             if c.point_fn is not None and c.strength > 0:
                 like = float(c.point_fn(g["lat"], g["lon"]))
                 why.append({"effect": 1 if like > 0.6 else -1 if like < 0.3 else 0, "text": c.title})

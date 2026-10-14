@@ -13,6 +13,10 @@ class Clue:
     countries: dict = field(default_factory=dict)  # iso2 -> 0..1 typicality
     background: float = 0.15  # likelihood (relative) for countries not listed
     point_fn: object = None   # optional f(lat, lon) -> likelihood multiplier per point
+    # Outside analysts (Claude, ChatGPT) are blended in as a mixture instead of multiplied:
+    # spots = [(lat, lon, radius_km, prob)], mix > 0 marks the clue (see Geolocator.mix_analysts).
+    mix: float = 0.0
+    spots: list = field(default_factory=list)
 
     def country_loglik(self, codes):
         """Per-country log-likelihood vector for the list of iso2 codes."""
@@ -26,7 +30,7 @@ class Clue:
         top = sorted(self.countries.items(), key=lambda kv: -kv[1])
         return {
             "kind": self.kind, "title": self.title, "detail": self.detail,
-            "strength": round(float(self.strength), 3),
+            "strength": round(float(max(self.strength, self.mix)), 3),
             "countries": [{"code": c, "name": name_fn(c) if name_fn else c, "weight": w}
                           for c, w in top[:12]],
             "n_countries": len(self.countries),
