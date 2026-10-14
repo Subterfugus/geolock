@@ -16,17 +16,18 @@ confidence and the clues for each guess.
 
 | Area | State |
 |---|---|
-| Engine (CLIP + GeoCLIP on OpenVINO, fusion, clustering, refinement) | Built; tested end to end with placeholder CLIP weights |
+| Engine (CLIP + GeoCLIP on OpenVINO, fusion, clustering, refinement) | Built; **run with the real CLIP ViT-L/14 weights** (all tests pass) |
 | Clues: OCR + language, domains, phone codes, currency, mph, script, scene, EXIF time zone | Built and unit-tested |
 | Deep analysis with a local vision-language model | Built, **not yet run** (needs the laptop) |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | Windows setup script and launcher | Written, **not yet run on Windows** |
-| Accuracy on real photos | **Not measured yet**: run `geolock eval <folder> --fit` on geotagged photos |
-| Confidence calibration | Built (`eval --fit` saves `models/calibration.json`); needs your photos |
+| Accuracy on real photos | **First numbers** on 151 iNaturalist outdoor photos from 102 countries (see "Test sets and results"); everyday-photo numbers need `geolock testset` on the laptop |
+| Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded (not runnable from the build machine) |
+| Confidence calibration | Built (`eval --fit` saves `models/calibration.json`); fit it on the Commons set or your own photos |
 
-Why some things are untested: the build machine had no access to Hugging Face, so the
-real CLIP weights (and the optional VLM) could only be downloaded on the laptop. Every
-other piece, including the real GeoCLIP location encoder and gallery, ran here.
+Why some things are untested: the build machine has no access to Hugging Face,
+Wikimedia, Flickr or Mapillary. The real CLIP weights were found inside a public Docker
+image instead (see "Test sets and results"); the optional VLM has still never run.
 
 ## How it works
 
@@ -100,8 +101,10 @@ tens of seconds per photo; smaller option: `setup_models --vlm Qwen/Qwen2-VL-2B-
 | `geolock/countrymeta.py`, `prompts.py` | Clue knowledge tables and CLIP prompts |
 | `geolock/geodata.py`, `geolock/data/` | Offline borders, regions, place names |
 | `geolock/server.py`, `geolock/web/` | Local web app (FastAPI + Leaflet, all vendored) |
-| `geolock/cli.py` | `serve`, `locate`, `eval`, `bench` |
+| `geolock/cli.py` | `serve`, `locate`, `eval`, `bench`, `testset` |
+| `geolock/testset.py` | Downloads the Wikimedia Commons test set |
 | `tools/build_geodata.py` | Rebuilds the bundled Natural Earth files |
+| `tools/build_inat_testset.py` | Builds a test set from iNaturalist open data (fallback) |
 | `tests/` | `pytest`; engine tests run when models are present |
 
 Models live in `models/` (git-ignored, about 0.8 GB FP16; another ~5 GB with the VLM).
@@ -122,6 +125,60 @@ Set `GEOLOCK_MODELS` to keep them elsewhere and `GEOLOCK_DEVICE` to force a devi
   Leaflet; an OpenStreetMap layer is available from the layer switcher when online.
 - **EXIF GPS is shown, never used for the guess.** It appears as a ★ so you can compare.
 
+## Test sets and results
+
+**`geolock testset <folder>`** (the one to use). Downloads ~300 photos from Wikimedia
+Commons, where every file has a free licence. For each country it picks random towns
+from GeoNames and takes one geotagged photo within 10 km of each, so the set covers the
+whole world rather than the most photographed places. Countries get photos in proportion
+to the square root of their number of towns (at most 4 each by default). Maps, flags,
+scans, artwork, museum and interior shots are skipped by title and category. It writes
+`labels.csv` (file, true lat/lon, country, title, author, licence, link) and
+`ATTRIBUTION.md`. `geolock eval` reads `labels.csv` when present, so EXIF is not needed.
+Re-running tops up an interrupted download. Not run yet: Commons is blocked on the build
+machine, so only its logic is tested (`tests/test_testset.py`, with a fake Commons).
+
+**iNaturalist fallback** (`tools/build_inat_testset.py`). iNaturalist's open data on AWS
+was reachable, so the first real numbers come from it. The tool streams the metadata
+(about 5 GB), keeps 3 research-grade observations per 1°×1° cell, scores thumbnails with
+CLIP and keeps only wide outdoor shots (most iNaturalist photos are close-ups of plants
+and animals). 4,622 thumbnails screened gave 161 wide shots; 151 photos from 102
+countries were kept. Licences are CC0, CC BY or CC BY-NC, credited in `ATTRIBUTION.md`.
+This is a **hard** set: nature scenes, few buildings, no text, and spread evenly over
+the world instead of the Europe and US skew of Im2GPS3k.
+
+**Results on the iNaturalist set (2026-10-14, real weights, CPU, no VLM)**
+
+| | 1 km | 25 km | 200 km | 750 km | 2500 km | median |
+|---|---|---|---|---|---|---|
+| GeoCLIP alone (top gallery point) | 0 % | 1 % | 5 % | 21 % | 45 % | 2,929 km |
+| GeoLock, default settings | 0 % | 3 % | 12 % | 29 % | 52 % | 2,222 km |
+| GeoLock, `--fit` settings | 0 % | 3 % | 13 % | 28 % | 52 % | 2,311 km |
+| `geolock eval` (clustered top guess) | 0 % | 1 % | 8 % | 26 % | 51 % | 2,417 km |
+
+Country right 15 % of the time. By continent (within 2500 km): Europe 72 %, North
+America 70 %, Africa 49 %, Asia 46 %, Oceania 29 %, South America 14 % (only 7 photos).
+For comparison, GeoCLIP's published Im2GPS3k numbers are 14 / 35 / 51 / 70 / 84 %, on
+photos that are mostly landmarks and cities.
+
+What this says:
+- The real weights work end to end, and fusion helps: CLIP's zero-shot country classifier
+  more than doubles the 200 km hit rate over GeoCLIP alone. Text clues add nothing here
+  because these photos have no text.
+- The clustered top guess in `eval` does a bit worse than the posterior's best gallery
+  point (8 % vs 12 % at 200 km). Worth a look: the 250 km clusters may favour broad
+  regions over the single best match.
+- Confidence was too high. With default settings, photos rated 50 %+ confident were
+  within 250 km only 35 % of the time, and 20-50 % ones 11 %. `--fit` chose temperature
+  2.0 and country weight 0.75, which spreads the probabilities out. Fit again on the
+  Commons set or your own photos; nature shots are not what you will usually upload.
+
+**How the real weights got here.** Hugging Face is blocked on the build machine, but
+Docker Hub is not. The public image `williamjokus/geoclip-serverless:v1` caches
+`openai/clip-vit-large-patch14` in one layer; its `model.safetensors` SHA-256
+(`a2bf730a…026dcb`) matches the Hugging Face file's content address. The laptop does not
+need this: `setup.ps1` downloads from Hugging Face directly.
+
 ## Audit (2026-10-14)
 
 An honest pass over every feature. "Ran here" means it ran on the build machine with
@@ -141,8 +198,8 @@ about real-photo accuracy yet.
 - `geolock eval --fit` end to end.
 
 **Not run yet (needs the laptop)**
-- Real CLIP weights, so real accuracy, the CLIP country classifier, and the script and
-  scene clues are unverified.
+- ~~Real CLIP weights~~: now run on the build machine (see "Test sets and results").
+  Accuracy on everyday photos still needs `geolock testset` + `eval` on the laptop.
 - Deep analysis (Qwen2.5-VL-7B via OpenVINO GenAI). The code follows the current GenAI
   API, and pip resolves its dependencies, but the model has never been loaded.
 - `setup.ps1` on Windows, and speed on the Arc GPU and NPU.
@@ -172,8 +229,9 @@ about real-photo accuracy yet.
 - Shorter text now counts for language detection.
 
 **Worth adding next (in order)**
-1. Run setup, `geolock bench`, and `geolock eval <folder> --fit` on the laptop. Everything
-   else depends on these numbers.
+1. Run setup, `geolock bench`, `geolock testset data/testset` and
+   `geolock eval data/testset --fit` on the laptop. Everything else depends on these
+   numbers.
 2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
    recognisable.
 3. ~~Multilingual OCR~~ (done, see the changelog).
@@ -184,6 +242,11 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-14**: Test sets. `geolock testset` downloads a licensed, world-spread
+  Wikimedia Commons set; `eval` reads `labels.csv` and can save per-photo results
+  (`--csv`); `tools/build_inat_testset.py` builds a set from iNaturalist open data. First
+  run with the real CLIP weights and first accuracy numbers (above).
 
 - **2026-10-14**: Multi-script OCR. RapidOCR 3 (PP-OCRv6 default + PP-OCRv5 Cyrillic,
   Greek, Korean, Thai, Arabic, Devanagari, Tamil, Telugu) on OpenVINO; script and
