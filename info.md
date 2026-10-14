@@ -174,6 +174,18 @@ What this says:
 - A denser location gallery (815k points: GeoCLIP's 100k plus one point per 1 km cell
   of MP-16's 4.7M photos) gave no clear gain on this set (9-11 % within 200 km), so the
   100k gallery stays.
+- State/province zero-shot prompts (CLIP scoring all 4,596 Natural Earth regions, mixed
+  into the posterior) moved results by -3 to +3 points depending on weights: within
+  noise for 151 photos (one photo is 0.7 points), so not shipped.
+- Is the pipeline worse than the model? No. GeoCLIP alone gets 5 % within 200 km on this
+  set against 51 % on Im2GPS3k in its paper, so the set is far harder than the
+  benchmark; GeoLock's fusion adds 7 points over GeoCLIP alone at 200 km and 2500 km.
+- A towns-and-streets subset (`--urban`) is not possible from iNaturalist: of 979
+  thumbnails from places near 5+ towns, CLIP judged 1 to be a street or building shot.
+  Everyday-photo numbers have to come from `geolock testset` (Commons) on the laptop.
+- Not tried here, because the weights are unreachable from the build machine: StreetCLIP
+  (geo-tuned CLIP, CC BY-NC), OSV-5M baselines, and the VLM country vote. These are the
+  candidates for a real step up and should be measured on the Commons set.
 - Confidence was too high. With default settings, photos rated 50 %+ confident were
   within 250 km only 35 % of the time, and 20-50 % ones 11 %. `--fit` chose temperature
   2.0 and country weight 0.75, which spreads the probabilities out. Fit again on the
