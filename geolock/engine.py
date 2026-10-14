@@ -125,13 +125,27 @@ class Geolocator:
         self.attr_text = {k: np.stack([emb[f"attr/{k}/{j}"] for j in range(len(a["options"]))])
                           for k, a in prompts.ATTRIBUTES.items()}
 
+    def _intel_gpu(self):
+        """OpenVINO also lists NVIDIA/AMD cards as GPU through OpenCL, but its GPU plugin
+        only has kernels for Intel graphics; AUTO uses the GPU only when it is Intel's."""
+        for d in self.core.available_devices:
+            if d.startswith("GPU"):
+                try:
+                    if "intel" in str(self.core.get_property(d, "FULL_DEVICE_NAME")).lower():
+                        return True
+                except Exception:
+                    pass
+        return False
+
     def _compile(self, model):
         avail = self.core.available_devices
-        order = {"AUTO": ["GPU", "NPU", "CPU"]}.get(self.requested_device.upper(),
-                                                   [self.requested_device.upper(), "CPU"])
+        auto = self.requested_device.upper() == "AUTO"
+        order = (["GPU", "NPU", "CPU"] if auto else [self.requested_device.upper(), "CPU"])
         errors = []
         for dev in order:
             if not any(a.startswith(dev) for a in avail):
+                continue
+            if auto and dev == "GPU" and not self._intel_gpu():
                 continue
             try:
                 cfg = {"PERFORMANCE_HINT": "LATENCY"}
@@ -151,7 +165,7 @@ class Geolocator:
     @cached_property
     def vlm(self):
         from .vlm import VisionLanguageModel
-        dev = "GPU" if any(d.startswith("GPU") for d in self.core.available_devices) else "CPU"
+        dev = "GPU" if self._intel_gpu() else "CPU"
         return VisionLanguageModel(self.models_dir / "vlm", dev)
 
     @property
