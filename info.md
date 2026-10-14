@@ -108,6 +108,10 @@ only:
 - Flags were checked against Claude Code 2.1.300 and Codex CLI 0.162.1 (`--help`), on
   2026-10-14.
 
+Never on by default: the app's boxes start unticked on every page load, `locate` and
+`eval` only ask with an explicit `--ask`, and the tests use fake `claude` / `codex`
+commands, so they never spend the user's plan.
+
 What is sent: the pixels only, re-encoded as JPEG (≤1568 px), so EXIF GPS and camera
 serials never leave the machine, plus (unless "Share GeoLock's findings" is off) a short
 text briefing: GeoLock's top 3 guesses, country odds, OCR text, clue titles, CLIP scene

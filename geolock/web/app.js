@@ -65,20 +65,16 @@ fetch("/api/status").then((r) => r.json()).then((s) => {
     const box = $(`#ask-${key}`), label = $(`#ask-${key}-label`);
     if (!box) continue;
     label.title = st.detail || "";
-    if (!st.available) { box.disabled = true; box.checked = false; label.classList.add("disabled"); }
-    else {
-      try { box.checked = localStorage.getItem("ask-" + key) === "1"; } catch (e) { /* storage off */ }
-    }
+    // Always starts unticked: each use spends the user's Claude / ChatGPT plan.
+    box.checked = false;
+    if (!st.available) { box.disabled = true; label.classList.add("disabled"); }
   }
   updateAskNote();
 }).catch(() => { $("#device").textContent = "offline?"; });
 
 const askBoxes = () => [...document.querySelectorAll("#ask-row input[data-provider]")];
 function updateAskNote() { $("#ask-note").hidden = !askBoxes().some((b) => b.checked); }
-askBoxes().forEach((b) => b.addEventListener("change", () => {
-  try { localStorage.setItem("ask-" + b.dataset.provider, b.checked ? "1" : "0"); } catch (e) { /* storage off */ }
-  updateAskNote();
-}));
+askBoxes().forEach((b) => b.addEventListener("change", updateAskNote));
 
 // ---------------------------------------------------------------- upload
 const drop = $("#drop");
