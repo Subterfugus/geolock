@@ -197,6 +197,17 @@ def test_stop_ends_a_running_analyst(fake_clis):
     assert analyst.ask_all(["claude"], img)[0]["ok"]  # the next ask is not stopped
 
 
+def test_stop_before_the_analyst_starts_is_kept(fake_clis):
+    """Stop pressed while GeoLock's own analysis still runs: the analyst is never launched."""
+    img = Image.new("RGB", (800, 600), (20, 90, 40))
+    (fake_clis / "claude.args").unlink(missing_ok=True)
+    analyst.PROGRESS.begin(["claude"], request_start=True)  # the backend, as the request arrives
+    analyst.PROGRESS.cancel()
+    (r,) = analyst.ask_all(["claude"], img)
+    assert r["stopped"] and not (fake_clis / "claude.args").exists()
+    assert analyst.ask_all(["claude"], img)[0]["ok"]  # a later ask starts fresh
+
+
 def test_model_lists_come_from_the_clis(fake_clis):
     opts = analyst.model_options(refresh=True)
     c, g = opts["claude"], opts["chatgpt"]

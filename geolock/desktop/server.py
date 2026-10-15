@@ -115,6 +115,9 @@ class Backend:
             raise HTTPException(409, "The models are not loaded yet.")
         opts = {p: {"model": self.settings[f"{p}_model"], "effort": self.settings[f"{p}_effort"]}
                 for p in ("claude", "chatgpt")}
+        if ask:  # Stop works from now on, also while GeoLock's own analysis runs first
+            from ..analyst import PROGRESS
+            PROGRESS.begin(ask, opts, request_start=True)
         with self.lock:
             result = eng.locate(photo, use_ocr=ocr, use_exif_gps=exif_gps, ask=ask,
                                 share_local=share_local, prior_analysts=prior,

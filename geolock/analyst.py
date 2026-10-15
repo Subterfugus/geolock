@@ -160,12 +160,18 @@ class Progress:
         self.state = {}
         self.stop = threading.Event()
         self.procs = set()
+        self.armed = False  # begin() ran at the start of the request; keep a Stop pressed since
 
-    def begin(self, providers, options=None):
+    def begin(self, providers, options=None, request_start=False):
+        """Reset for a new ask. The desktop backend calls it with request_start=True when the
+        request arrives (before GeoLock's own analysis), so Stop works from the first moment;
+        ask_all() then keeps a Stop pressed in between instead of clearing it."""
         options = options or {}
         now = time.time()
         with self.lock:
-            self.stop.clear()
+            if request_start or not self.armed:
+                self.stop.clear()
+            self.armed = request_start
             self.state = {p: {"stage": "preparing", "started": now, "updated": now,
                               "model": (options.get(p) or {}).get("model") or None,
                               "effort": (options.get(p) or {}).get("effort") or None,
@@ -224,6 +230,9 @@ def _kill(proc):
         if sys.platform == "win32":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True,
                            creationflags=0x08000000, timeout=10)
+        else:
+            import signal
+            os.killpg(proc.pid, signal.SIGKILL)  # the CLI's whole process group
         proc.kill()
     except Exception:
         pass
@@ -234,6 +243,8 @@ def _run_live(cmd, stdin=None, cwd=None, timeout=TIMEOUT_S, on_line=None):
     kw = {}
     if sys.platform == "win32":
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    else:
+        kw["start_new_session"] = True  # own process group, so Stop can end its helpers too
     if PROGRESS.stop.is_set():
         raise Stopped()
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
