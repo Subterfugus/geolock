@@ -27,7 +27,8 @@ confidence and the clues for each guess.
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
 | Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
 | Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
-| Confidence calibration | Built and **fitted on the Commons set** (temperature 1.5, country weight 0.5) |
+| Confidence calibration | **Re-fitted 2026-10-15** on half of a new 294-photo Commons set (temperature 1.5, country weight 1.0, scene clues ×2, zoomed crops on) and checked on the other half: median 785 → 636 km, country 33 → 36 % |
+| Licence plates and postcodes (`geolock/addresses.py`) | Built in 0.5.0; fired on only 4 of 294 Commons photos (all 4 plates mis-read as another country's format, so plate strength was lowered); no postcodes in that set |
 
 Why some things are untested: the build machine has no access to Hugging Face,
 Wikimedia, Flickr or Mapillary. The real CLIP weights were found inside a public Docker
@@ -314,6 +315,29 @@ Set `GEOLOCK_MODELS` to keep them elsewhere and `GEOLOCK_DEVICE` to force a devi
 
 ## Test sets and results
 
+**Accuracy batch on the Yoga laptop (2026-10-15, 0.5.0 code, GPU, no Claude/ChatGPT)**
+
+New 294-photo Commons set (`geolock testset -n 300 --seed 0`, 201 countries, ~4 s per photo
+to download). Within 1/25/200/750/2500 km:
+
+| Run (294 photos) | Median | Country | 1 | 25 | 200 | 750 | 2500 |
+|---|---|---|---|---|---|---|---|
+| 0.4.4 baseline | 752 km | 37 % | 1 | 8 | 27 | 50 | 67 |
+| + plates and postcodes | identical (fired on 4 photos) | | | | | | |
+| + zoomed crops (2x2 grid, +73 ms) | 725 km | 37 % | 1 | 8 | 27 | 51 | 68 |
+| + fit on all 294 (in-sample) | 615 km | 40 % | 1 | 9 | 28 | 53 | 70 |
+
+Honest check: fitted on half A (147), tested on half B (147), zoomed crops on:
+
+| Half B | Median | Country | 1 | 25 | 200 | 750 | 2500 | ">50 %" right |
+|---|---|---|---|---|---|---|---|---|
+| old calibration | 785 km | 33 % | 1 | 7 | 22 | 49 | 66 | 81 % of 26 |
+| fit from A (shipped in 0.5.0) | 636 km | 36 % | 1 | 9 | 24 | 52 | 69 | 69 % of 36 |
+
+The full-set fit wanted text clues off (scale 0) but half A kept them at 1.0, and text 0.5
+scored identically on B, so text stays at 1.0. Zoomed crops alone are within noise (94
+photos moved >50 km: 43 better, 51 worse); together with the re-fit they help.
+
 **Results on the Yoga laptop (2026-10-15, installer v0.3.0, no Claude/ChatGPT)**
 
 Lenovo Yoga 9 2-in-1 14ILL10 (83LC), Core Ultra 7 258V, Arc 140V, AI Boost NPU, 32 GB,
@@ -497,6 +521,15 @@ about real-photo accuracy yet.
 7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Version 0.5.0, the accuracy batch (Brady's picks from the idea lists).
+  Licence plates and postcodes (`geolock/addresses.py`; GeoNames postcode list built by
+  `tools/build_postcodes.py`, bundled as postcodes.npz, 887k postcodes, 9.6 MB). Zoomed
+  crops: a second CLIP batch of the four quarters (`extra_crops`, `GEOLOCK_EXTRA_CROPS`).
+  `eval --fit` now also fits a strength scale per clue group (scene / text / time) and
+  takes `--fit-out`. The app copies the bundled calibration over an older one at load, so
+  updates bring re-fitted settings. StreetCLIP: experiment extended with state/province
+  prompts (see "Test sets and results"). Measured on the Yoga laptop; numbers above.
 
 - **2026-10-15**: Version 0.4.4: in-app updates. GeoLock checks the newest GitHub release's
   `latest.json` at startup, offers an Update button with notes and size, downloads on click
