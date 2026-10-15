@@ -29,7 +29,9 @@ from .clues import Clue
 from .geodata import haversine_km, norm_name
 
 SIGMA_KM = 8.0         # a postcode covers a town or a district, not a street
-PLATE_STRENGTH = 0.55  # one plate, one country; lower when the format is shared
+PLATE_STRENGTH = 0.4   # one plate, one country; lower when the format is shared
+# Formats no other country uses (own script): these may be trusted more.
+STRONG_PLATES = {"CN", "KR", "JP"}
 MIN_SCORE = 0.6        # OCR confidence below this is too unreliable for exact formats
 
 # Romanian county codes, Swiss cantons, Indian states and Irish counties keep those formats
@@ -55,7 +57,7 @@ PLATES = [
     (rf"[{_CYR}I]{{2}} ?\d{{4}} ?[{_CYR}I]{{2}}", {"UA": 1, "BG": 0.6}),
     (rf"(?:{_RO}) \d{{2,3}} [A-Z]{{3}}", {"RO": 1}),
     (rf"(?:{_CH}) ?\d{{3,6}}", {"CH": 1}),
-    (r"[A-Z]{3} ?\d{2}[A-Z0-9]", {"SE": 1, "LT": 0.4}),
+    (r"[A-Z]{3} ?\d{2}[A-Z]", {"SE": 1}),
     (r"[A-Z]{3}-\d{3}", {"FI": 1, "HU": 1}),
     (r"[A-Z]{2} [A-Z]{2}-\d{3}", {"HU": 1}),
     (r"[A-Z]{2} ?\d{5}", {"NO": 1, "DK": 1}),
@@ -67,7 +69,6 @@ PLATES = [
     (rf"\d{{2,3}}-(?:{_IE})-\d{{1,6}}", {"IE": 1}),
     (r"\d{3} ?[A-Z]{3}", {"EE": 1}),
     (r"[A-Z]{2}-\d{4}", {"LV": 1}),
-    (r"[A-Z]{3}-\d{2,3}-[A-Z0-9]", {"MX": 1}),
     (r"\d{2}[A-Z]\d?-\d{3}\.?\d{2}", {"VN": 1}),
     (r"[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-Z]·?[A-Z0-9]{5,6}", {"CN": 1}),
     (r"\d{2,3}[가-힣] ?\d{4}", {"KR": 1}),
@@ -129,7 +130,8 @@ def plate_clues(lines):
         clues.append(Clue(
             kind="plate", title=f"Licence plate “{key}”",
             detail=f"The plate format fits {names}. Cars do cross borders.",
-            strength=PLATE_STRENGTH if len(full) == 1 else PLATE_STRENGTH * 0.75,
+            strength=(0.6 if set(full) <= STRONG_PLATES else PLATE_STRENGTH)
+            * (1 if len(full) == 1 else 0.75),
             countries=countries, background=0.1))
     return clues
 
