@@ -144,6 +144,10 @@ jobs:
           else
             notes="docs/releases/$tag.md"
             [ -f "$notes" ] || { echo "Windows installer. Download, run, and GeoLock appears in the Start menu. On first launch it downloads the CLIP model once (about 600 MB)." > "$RUNNER_TEMP/notes.md"; notes="$RUNNER_TEMP/notes.md"; }
-            gh release create "$tag" "${{ steps.out.outputs.file }}" --title "GeoLock $tag" \
-              --notes-file "$notes" --target "$GITHUB_SHA"
+            # latest.json tells installed apps about this release (Settings > Updates).
+            python tools/update_manifest.py --installer "${{ steps.out.outputs.file }}" \
+              --version "${{ steps.out.outputs.version }}" --repo "$GITHUB_REPOSITORY" \
+              --notes "$notes" --out "$RUNNER_TEMP/latest.json"
+            gh release create "$tag" "${{ steps.out.outputs.file }}" "$RUNNER_TEMP/latest.json" \
+              --title "GeoLock $tag" --notes-file "$notes" --target "$GITHUB_SHA" --latest
           fi

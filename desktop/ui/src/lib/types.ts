@@ -115,6 +115,29 @@ export interface Settings {
   claude_effort: Effort;
   chatgpt_model: string;
   chatgpt_effort: Effort;
+  /** Look for a new release when the app starts. */
+  check_updates: boolean;
+}
+
+export type UpdateState = 'idle' | 'checking' | 'up_to_date' | 'available' | 'downloading' | 'ready' | 'error';
+
+/** GET /api/update: the newest release and the download of its installer. */
+export interface UpdateInfo {
+  state: UpdateState;
+  current: string;
+  error: string | null;
+  /** Seconds since the epoch. */
+  checked_at: number | null;
+  latest: string | null;
+  /** Release notes, markdown. */
+  notes: string | null;
+  published_at: string | null;
+  size_mb: number | null;
+  free_disk_mb: number | null;
+  progress: { fraction: number; done_mb: number; total_mb: number; speed_mbps: number | null; eta_s: number | null; message?: string } | null;
+  /** Set once the installer is downloaded and its checksum matches. */
+  installer_path: string | null;
+  releases_url: string;
 }
 
 /** GET /api/analysts/models: what the installed claude / codex CLIs accept. */

@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "keep_history": True,
     "theme": "system",
     "map_style": "streets",
+    "check_updates": True,    # look for a new release when the app starts
     "claude_model": "",       # "" = the CLI's own default; else an alias or model name
     "claude_effort": "",      # "" = default; else low | medium | high | xhigh | max
     "chatgpt_model": "",

@@ -23,6 +23,7 @@ confidence and the clues for each guess.
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). 2026-10-15: geoguessing checklist prompt and zoomed sign crops (fake CLIs only so far). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Released as v0.3.0 and 0.3.1 on GitHub Releases; 0.4.0 is the UX overhaul (model/effort pickers with live progress, street map, findable settings, new look). Every main build installs the real installer on a Windows CI runner, runs first-run setup and a locate, and screenshots the window (pushed to the `ci-screenshots` branch). **Installed and run on the Yoga laptop** (2026-10-15, see "Results on the Yoga laptop") |
+| In-app updates (check at startup, Update button, checked download, install and restart) | Built in 0.4.4. Check and download tested against a local fake release server; the install step (shell + NSIS) is compiled in CI but not yet run on a real PC. Needs public release downloads |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
 | Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
 | Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
@@ -245,6 +246,18 @@ Start menu, and it runs in its own window. The browser version (`run.bat`) still
   only on pushes to main (or by hand) and always runs to the end. Pull requests get only the
   quick checks in `.github/workflows/tests.yml` (Python tests plus a UI typecheck and build)
   and merge once those pass; anything the Windows build catches on main is fixed forward.
+- **Updates** (0.4.4, `geolock/desktop/updater.py`, `desktop/src-tauri/src/update.rs`):
+  at startup the UI asks the backend to read `latest.json` from the newest GitHub release
+  (a few KB; setting `check_updates`, Settings › Updates). A newer version shows an orange
+  Update button in the library footer and a dialog with the notes and download size; the
+  installer (~400 MB) downloads only on click, resumes after Cancel, and must match the
+  manifest's size and SHA-256. "Install and restart" makes the shell stop the backend, run
+  the installer with `/P /UPDATE /R` and exit; the installer starts GeoLock again. CI writes
+  `latest.json` (`tools/update_manifest.py`) and uploads it with each release. The manifest
+  may only point at a `github.com/.../releases/download/` URL. No Tauri updater signature:
+  CI would hold the signing key anyway, so it adds a secret to manage without protecting
+  against much more than the GitHub checksum does. Downloads need public release assets.
+  `.github/workflows/shell.yml` runs `cargo check` on Windows for PRs that touch the shell.
 - **Processor** (`geolock/devices.py`): Auto tries the Arc GPU, then the NPU, then the
   CPU; a fixed choice in Settings tries that device, then the CPU. A device that fails to
   compile, fails while running, or returns NaN/infinity is dropped and the photo carries
@@ -484,6 +497,13 @@ about real-photo accuracy yet.
 7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Version 0.4.4: in-app updates. GeoLock checks the newest GitHub release's
+  `latest.json` at startup, offers an Update button with notes and size, downloads on click
+  (resumable, SHA-256 checked) and installs with the NSIS installer in passive mode, then
+  restarts. Releases now also upload `latest.json`. 0.4.4 itself must be installed by hand
+  once. Tested with a local fake release server and the mock UI; the real install step
+  (shell + NSIS) is not tested yet.
 
 - **2026-10-15**: Version 0.4.3, ideas 2 and 6 of the accuracy list. (2) Optional
   OpenStreetMap lookup of sign text (`geolock/osm.py`, setting `osm_lookup`, off by default,

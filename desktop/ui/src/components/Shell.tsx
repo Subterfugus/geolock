@@ -9,6 +9,7 @@ import { Library } from './Library';
 import { MapView } from './MapView';
 import { ConfirmDialog, DropOverlay, Lightbox, ShortcutsPopover, Toasts } from './Overlays';
 import { SettingsDialog } from './Settings';
+import { UpdateDialog } from './Update';
 import { IconButton } from './ui';
 
 /** The main window: library, map and inspector, plus the global overlays. */
@@ -35,6 +36,7 @@ export function Shell() {
       <Toasts />
       <ConfirmDialog />
       <SettingsDialog />
+      <UpdateDialog />
       <ShortcutsPopover />
       <DropOverlay />
       <Lightbox />

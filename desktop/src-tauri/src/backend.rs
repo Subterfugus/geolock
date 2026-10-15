@@ -124,6 +124,11 @@ impl BackendState {
         self.lock().info()
     }
 
+    /// The app data folder (the backend keeps downloaded updates in `updates/` there).
+    pub fn data_dir(&self) -> PathBuf {
+        self.lock().data_dir.clone()
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Backend> {
         // A poisoned lock only means a panic happened while holding it. The data is still usable.
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
