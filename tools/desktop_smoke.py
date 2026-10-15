@@ -51,6 +51,65 @@ def multipart(fields, file_name, file_bytes):
     return out.getvalue(), f"multipart/form-data; boundary={b}"
 
 
+def run_setup(port):
+    rep = call(port, "/api/setup")
+    print(f"setup: {rep['download_mb']} MB from {rep['source']}", flush=True)
+    call(port, "/api/setup/start", "POST", b"")
+    t0, last = time.time(), ""
+    while True:
+        st = call(port, "/api/status", timeout=10)
+        rep = call(port, "/api/setup", timeout=10)
+        msg = (rep.get("progress") or {}).get("message") or st["state"]
+        if msg != last and (time.time() % 10 < 1 or "Download" not in msg):
+            print(f"  {time.time() - t0:5.0f}s {msg}", flush=True)
+            last = msg
+        if st["state"] == "ready":
+            break
+        if rep.get("error") or st["state"] == "error":
+            raise SystemExit(f"setup failed: {rep.get('error') or st.get('error')}")
+        if time.time() - t0 > 1500:
+            raise SystemExit("setup timed out")
+        time.sleep(1)
+    print(f"ready on {st['device']} after {time.time() - t0:.0f}s", flush=True)
+
+
+def run_locate(port):
+    body, ctype = multipart({"name": "smoke.jpg", "ocr": "true"}, "smoke.jpg", photo())
+    t = time.time()
+    res = call(port, "/api/locate", "POST", body, ctype)
+    g = res["guesses"][0]
+    print(f"locate: {time.time() - t:.1f}s, top guess {g['country']} {g['confidence']:.0%}, "
+          f"{len(res['clues'])} clues, OCR lines {len(res['ocr'])}, timings {res['timings']}", flush=True)
+    assert res["guesses"] and res["heat"] and res["countries"]
+    assert not res["analysts"]  # never asks Claude / ChatGPT
+    assert any(c["kind"] == "ocr" for c in res["clues"]), "OCR did not read the sign"
+    assert call(port, "/api/history")[0]["id"] == res["id"]
+    assert call(port, res["thumb_url"])[:2] == b"\xff\xd8"
+
+
+def wait_up(port, timeout=300):
+    t0 = time.time()
+    while True:
+        try:
+            return call(port, "/api/status", timeout=5)
+        except Exception:
+            if time.time() - t0 > timeout:
+                raise SystemExit("backend did not answer")
+            time.sleep(0.5)
+
+
+def attach(argv):
+    """Drive a backend the installed app started: attach PORT TOKEN setup|locate|status."""
+    global TOKEN
+    port, TOKEN, step = int(argv[0]), argv[1], argv[2]
+    st = wait_up(port)
+    print(f"attached: state={st['state']} device={st['device']} devices={st['available_devices']}", flush=True)
+    if step == "setup" and st["state"] != "ready":
+        run_setup(port)
+    elif step == "locate":
+        run_locate(port)
+
+
 def main():
     exe = Path(sys.argv[1]).resolve()
     data_dir = Path(tempfile.mkdtemp(prefix="geolock-smoke-"))
@@ -74,35 +133,8 @@ def main():
                 time.sleep(0.5)
         print(f"started in {time.time() - t0:.1f}s: state={st['state']} devices={st['available_devices']}", flush=True)
         assert st["state"] == "needs_setup", st
-        rep = call(port, "/api/setup")
-        print(f"setup: {rep['download_mb']} MB from {rep['source']}", flush=True)
-        call(port, "/api/setup/start", "POST", b"")
-        t0, last = time.time(), ""
-        while True:
-            st = call(port, "/api/status", timeout=10)
-            rep = call(port, "/api/setup", timeout=10)
-            msg = (rep.get("progress") or {}).get("message") or st["state"]
-            if msg != last and (time.time() % 10 < 1 or "Download" not in msg):
-                print(f"  {time.time() - t0:5.0f}s {msg}", flush=True)
-                last = msg
-            if st["state"] == "ready":
-                break
-            if rep.get("error") or st["state"] == "error":
-                raise SystemExit(f"setup failed: {rep.get('error') or st.get('error')}")
-            if time.time() - t0 > 1500:
-                raise SystemExit("setup timed out")
-            time.sleep(1)
-        print(f"ready on {st['device']} after {time.time() - t0:.0f}s", flush=True)
-        body, ctype = multipart({"name": "smoke.jpg", "ocr": "true"}, "smoke.jpg", photo())
-        t = time.time()
-        res = call(port, "/api/locate", "POST", body, ctype)
-        g = res["guesses"][0]
-        print(f"locate: {time.time() - t:.1f}s, top guess {g['country']} {g['confidence']:.0%}, "
-              f"{len(res['clues'])} clues, OCR lines {len(res['ocr'])}, timings {res['timings']}", flush=True)
-        assert res["guesses"] and res["heat"] and res["countries"]
-        assert any(c["kind"] == "ocr" for c in res["clues"]), "OCR did not read the sign"
-        assert call(port, "/api/history")[0]["id"] == res["id"]
-        assert call(port, res["thumb_url"])[:2] == b"\xff\xd8"
+        run_setup(port)
+        run_locate(port)
         ok = True
     finally:
         proc.stdin.close()  # what happens when the app quits or crashes
@@ -119,4 +151,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["attach"]:
+        attach(sys.argv[2:])
+    else:
+        main()

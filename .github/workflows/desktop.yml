@@ -100,6 +100,15 @@ jobs:
           ls -la "$f"
           echo "file=$f" >> "$GITHUB_OUTPUT"
           echo "version=$(python -c 'import geolock; print(geolock.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Install and run the app (silent install, first run, locate, screenshots)
+        shell: pwsh
+        run: ./tools/installer_test.ps1 -Setup "${{ steps.out.outputs.file }}" -Shots screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-test-screenshots
+          path: screenshots
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: GeoLock-installer

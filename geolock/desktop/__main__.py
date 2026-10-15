@@ -10,7 +10,6 @@ from pathlib import Path
 # OpenBLAS's thread pool hung here twice: at DLL load on Windows (frozen) and inside a
 # matmul in the model-setup thread on Linux, after OpenVINO had run in the same process.
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 
 def default_data_dir():
