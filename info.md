@@ -338,6 +338,20 @@ The full-set fit wanted text clues off (scale 0) but half A kept them at 1.0, an
 scored identically on B, so text stays at 1.0. Zoomed crops alone are within noise (94
 photos moved >50 km: 43 better, 51 worse); together with the re-fit they help.
 
+StreetCLIP re-test (2026-10-15, all 294 photos, fitted calibration, zoomed crops on, CPU
+PyTorch; `tools/streetclip_experiment.py`, now with 4596 state/province prompts as a region
+clue). Zero-shot country top-1: CLIP 32 %, StreetCLIP 34 %. At country weight 1.0:
+
+| Variant | Median | Country | 200 km | 750 km | 2500 km |
+|---|---|---|---|---|---|
+| CLIP (shipped) | 607 km | 40 % | 28 | 53 | 70 |
+| StreetCLIP instead | 588 km | 40 % | 29 | 54 | 68 |
+| CLIP x StreetCLIP + regions (best) | 569 km | 41 % | 31 | 55 | 69 |
+
+The best variant gains about 1-3 points, a few photos out of 294 and within noise, for a
+0.9 GB download, ~200 ms per photo and an OpenVINO port. **Not added** (second time it
+measures as noise). Revisit only as the encoder for a trained geocell head.
+
 **Results on the Yoga laptop (2026-10-15, installer v0.3.0, no Claude/ChatGPT)**
 
 Lenovo Yoga 9 2-in-1 14ILL10 (83LC), Core Ultra 7 258V, Arc 140V, AI Boost NPU, 32 GB,
@@ -528,8 +542,8 @@ about real-photo accuracy yet.
   crops: a second CLIP batch of the four quarters (`extra_crops`, `GEOLOCK_EXTRA_CROPS`).
   `eval --fit` now also fits a strength scale per clue group (scene / text / time) and
   takes `--fit-out`. The app copies the bundled calibration over an older one at load, so
-  updates bring re-fitted settings. StreetCLIP: experiment extended with state/province
-  prompts (see "Test sets and results"). Measured on the Yoga laptop; numbers above.
+  updates bring re-fitted settings. StreetCLIP re-tested with state/province
+  prompts: +1-3 points at best, not added (see "Test sets and results"). Measured on the Yoga laptop; numbers above.
 
 - **2026-10-15**: Version 0.4.4: in-app updates. GeoLock checks the newest GitHub release's
   `latest.json` at startup, offers an Update button with notes and size, downloads on click
