@@ -338,8 +338,10 @@ class Geolocator:
         return final / final.sum(), w * spots
 
     def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
-               keep_evidence=False, ask=(), share_local=True, prior_analysts=()):
+               keep_evidence=False, ask=(), share_local=True, prior_analysts=(),
+               analyst_options=None):
         """ask: analysts to consult ("claude", "chatgpt"); see geolock/analyst.py.
+        analyst_options: {"claude": {"model": "opus", "effort": "high"}, ...}
         prior_analysts: answers from an earlier run, reused as they are (the desktop app
         keeps them when a photo is re-analysed, so the user's plan isn't asked twice)."""
         t0 = time.perf_counter()
@@ -353,8 +355,11 @@ class Geolocator:
             from .analyst import analyst_clues, ask_all
             t = time.perf_counter()
             if ask:
-                analysts += ask_all(ask, im, self.briefing(ev, meta) if share_local else None,
-                                    ocr_lines=ev["ocr"])
+                fresh = ask_all(ask, im, self.briefing(ev, meta) if share_local else None,
+                                ocr_lines=ev["ocr"], options=analyst_options)
+                earlier = {a.get("provider"): a for a in prior_analysts}
+                # stopped by the user: keep the answer this photo already had, if any
+                analysts += [earlier.get(a["provider"], a) if a.get("stopped") else a for a in fresh]
             for a in analysts:
                 ev["clues"] += analyst_clues(a, codes, self.geo.country_name)
                 for g in a.get("guesses", []):

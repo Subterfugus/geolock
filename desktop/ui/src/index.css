@@ -1,74 +1,79 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ tokens */
-/* Dark is the default; [data-theme] is set by the app (and by index.html before first paint). */
+/* "Field instrument": warm graphite and paper, one signal-orange accent, hairline rules,
+   tight corners, IBM Plex Sans for text and Plex Mono for every number and coordinate.
+   Dark is the default; [data-theme] is set by the app (and by index.html before first paint). */
 :root,
 :root[data-theme="dark"] {
-  --bg: #07090c;
-  --surface: #0e1116;
-  --surface-2: #131820;
-  --surface-3: #1a2029;
-  --surface-glass: rgb(16 20 27 / 0.74);
-  --border: #1f2630;
-  --border-strong: #2d3642;
-  --fg: #e9ecf2;
-  --fg-2: #a4adbb;
-  --fg-3: #6e7888;
-  --accent: #8ba7ff;
-  --accent-strong: #6d8cff;
-  --accent-soft: rgb(139 167 255 / 0.14);
-  --accent-fg: #0a0f22;
-  --high: #34d399;
-  --medium: #fbbf24;
-  --low: #8ea3c7;
-  --pin-fg: #0b0f14;
-  --pos: #34d399;
-  --neg: #f87171;
-  --danger: #f87171;
-  --danger-soft: rgb(248 113 113 / 0.12);
-  --claude: #eb9a6f;
-  --chatgpt: #2dd4bf;
-  --shadow: 0 18px 50px rgb(0 0 0 / 0.5);
-  --shadow-sm: 0 6px 18px rgb(0 0 0 / 0.32);
-  --scrim: rgb(4 6 9 / 0.62);
-  --ring-track: #222b36;
+  --bg: #111110;
+  --surface: #181816;
+  --surface-2: #1f1e1b;
+  --surface-3: #292824;
+  --surface-glass: #181816;
+  --border: #2c2b27;
+  --border-strong: #44423c;
+  --fg: #eceae4;
+  --fg-2: #b2aea4;
+  --fg-3: #7f7b71;
+  --accent: #ff6b2c;
+  --accent-strong: #ff8a55;
+  --accent-soft: rgb(255 107 44 / 0.14);
+  --accent-fg: #1a0b03;
+  --high: #93d070;
+  --medium: #e9b440;
+  --low: #8e8a7f;
+  --pin-fg: #111110;
+  --pos: #93d070;
+  --neg: #f0805f;
+  --danger: #f2684c;
+  --danger-soft: rgb(242 104 76 / 0.12);
+  --claude: #d97757;
+  --chatgpt: #3fb68e;
+  --shadow: 0 24px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(0 0 0 / 0.4);
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.35);
+  --scrim: rgb(8 8 7 / 0.66);
+  --ring-track: #2c2b27;
+  --grid: rgb(255 255 255 / 0.035);
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #eceff3;
-  --surface: #ffffff;
-  --surface-2: #f6f7f9;
-  --surface-3: #eceef2;
-  --surface-glass: rgb(255 255 255 / 0.8);
-  --border: #e2e5ea;
-  --border-strong: #cdd2da;
-  --fg: #111419;
-  --fg-2: #4d5563;
-  --fg-3: #858d9b;
-  --accent: #4262e6;
-  --accent-strong: #3550d6;
-  --accent-soft: rgb(66 98 230 / 0.1);
+  --bg: #ebe8df;
+  --surface: #faf8f3;
+  --surface-2: #f3f0e7;
+  --surface-3: #e7e3d8;
+  --surface-glass: #faf8f3;
+  --border: #dcd7ca;
+  --border-strong: #c3bcab;
+  --fg: #1b1a17;
+  --fg-2: #56534a;
+  --fg-3: #8a8679;
+  --accent: #e0480b;
+  --accent-strong: #c23d08;
+  --accent-soft: rgb(224 72 11 / 0.1);
   --accent-fg: #ffffff;
-  --high: #059669;
-  --medium: #d97706;
-  --low: #5b6f94;
+  --high: #3f8a2a;
+  --medium: #b7791f;
+  --low: #7b776c;
   --pin-fg: #ffffff;
-  --pos: #047857;
-  --neg: #dc2626;
-  --danger: #dc2626;
-  --danger-soft: rgb(220 38 38 / 0.08);
-  --claude: #c4642f;
-  --chatgpt: #0f8f7d;
-  --shadow: 0 18px 44px rgb(20 28 40 / 0.16);
-  --shadow-sm: 0 4px 14px rgb(20 28 40 / 0.1);
-  --scrim: rgb(20 26 36 / 0.36);
-  --ring-track: #e4e7ec;
+  --pos: #3f8a2a;
+  --neg: #c2410c;
+  --danger: #c8321a;
+  --danger-soft: rgb(200 50 26 / 0.08);
+  --claude: #c15f3c;
+  --chatgpt: #11845f;
+  --shadow: 0 24px 50px rgb(40 34 20 / 0.18), 0 0 0 1px rgb(40 34 20 / 0.08);
+  --shadow-sm: 0 1px 0 rgb(40 34 20 / 0.08);
+  --scrim: rgb(30 26 18 / 0.32);
+  --ring-track: #e2ddd0;
+  --grid: rgb(0 0 0 / 0.035);
   color-scheme: light;
 }
 
 @theme inline {
-  --font-sans: "Inter Variable", Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -91,7 +96,13 @@
   --color-danger-soft: var(--danger-soft);
   --color-claude: var(--claude);
   --color-chatgpt: var(--chatgpt);
-  --radius-card: 14px;
+  /* Tight corners everywhere: rounded-lg/xl/2xl stay square-ish instead of soft cards. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 5px;
+  --radius-2xl: 6px;
+  --radius-card: 5px;
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -107,6 +118,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13.5px;
   line-height: 1.45;
+  font-feature-settings: "ss02";
   overflow: hidden;
   user-select: none;
 }
@@ -116,23 +128,28 @@ input, textarea, [contenteditable="true"] { user-select: text; }
 }
 img { -webkit-user-drag: none; }
 ::selection { background: var(--accent-soft); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 /* Dialogs take focus so Tab starts inside them; that is not a keyboard target worth a ring. */
 [tabindex="-1"]:focus-visible { outline: none; }
 [hidden] { display: none !important; }
-.tnum { font-variant-numeric: tabular-nums; }
+/* Numbers read like an instrument: monospaced, tabular. */
+.tnum, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3);
+}
 
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 0; border: 3px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-.glass {
-  background: var(--surface-glass);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+/* Floating map controls: solid panels with a hairline frame, no frosted glass. */
+.glass, .panel {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: 0 2px 0 rgb(0 0 0 / 0.18);
 }
 
 /* ---------------------------------------------------------- animations */
@@ -171,7 +188,7 @@ img { -webkit-user-drag: none; }
   position: relative;
   width: 26px; height: 26px; border-radius: 999px;
   display: flex; align-items: center; justify-content: center;
-  font: 650 12px/1 var(--font-sans); font-variant-numeric: tabular-nums;
+  font: 600 12px/1 var(--font-mono); font-variant-numeric: tabular-nums;
   color: var(--pin-fg);
   border: 2px solid #fff;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
@@ -184,6 +201,7 @@ img { -webkit-user-drag: none; }
 .gl-pin-guess[data-label="medium"] { background: var(--medium); }
 .gl-pin-guess[data-label="low"] { background: var(--low); }
 .gl-pin-guess[data-rank="1"] { width: 34px; height: 34px; }
+.gl-pin-guess { border-radius: 4px; }
 .gl-pin-guess.is-selected {
   transform: scale(1.12);
   box-shadow: 0 0 0 4px var(--accent), 0 4px 14px rgb(0 0 0 / 0.5);

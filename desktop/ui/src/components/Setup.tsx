@@ -28,7 +28,7 @@ export function SetupScreen() {
     <div className="relative h-full">
       <MapView dim />
       <div className="absolute inset-0 flex items-center justify-center overflow-y-auto p-6">
-        <div className="pop-in w-full max-w-[540px] rounded-3xl border border-border bg-surface shadow-[var(--shadow)]">
+        <div className="pop-in w-full max-w-[540px] rounded-md border border-border bg-surface shadow-[var(--shadow)]">
           <div className="flex items-center gap-3 border-b border-border px-7 py-4">
             <img src={LOGO_SRC} alt="" className="h-7 w-7" />
             <span className="text-[14px] font-semibold tracking-[-0.01em]">GeoLock setup</span>

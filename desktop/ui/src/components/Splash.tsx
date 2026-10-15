@@ -26,7 +26,7 @@ export function BootError() {
   const dataDir = useStore((s) => s.dataDir);
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="pop-in w-full max-w-[480px] rounded-3xl border border-border bg-surface p-7 shadow-[var(--shadow)]">
+      <div className="pop-in w-full max-w-[480px] rounded-md border border-border bg-surface p-7 shadow-[var(--shadow)]">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-danger-soft text-danger"><AlertTriangle size={20} /></div>
         <h1 className="mt-4 text-[20px] font-semibold tracking-[-0.02em]">GeoLock's engine didn't start</h1>
         <p className="mt-2 text-[13.5px] leading-relaxed text-fg-2">
@@ -53,7 +53,7 @@ export function FatalError() {
   const dataDir = useStore((s) => s.dataDir ?? s.status?.data_dir ?? null);
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="pop-in w-full max-w-[480px] rounded-3xl border border-border bg-surface p-7 shadow-[var(--shadow)]">
+      <div className="pop-in w-full max-w-[480px] rounded-md border border-border bg-surface p-7 shadow-[var(--shadow)]">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-danger-soft text-danger"><AlertTriangle size={20} /></div>
         <h1 className="mt-4 text-[20px] font-semibold tracking-[-0.02em]">GeoLock couldn't load its models</h1>
         <p className="mt-3 break-words rounded-xl bg-danger-soft px-4 py-3 text-[13px] text-danger">{message}</p>

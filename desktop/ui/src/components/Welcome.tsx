@@ -11,7 +11,7 @@ export function Welcome() {
   if (!empty) return null;
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 fade-in">
-      <div className="pointer-events-auto glass flex w-full max-w-[460px] flex-col items-center rounded-3xl px-8 py-9 text-center">
+      <div className="pointer-events-auto glass flex w-full max-w-[460px] flex-col items-center rounded-md px-8 py-9 text-center">
         <div className="relative mb-6 flex h-[120px] w-[168px] items-center justify-center">
           <div className="absolute inset-0 rounded-[22px] border-[1.5px] border-dashed border-accent/50 bg-accent-soft" />
           <span className="absolute inset-0 rounded-[22px] border border-accent/30" style={{ animation: 'gl-ring 2.4s ease-out infinite' }} />

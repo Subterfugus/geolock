@@ -72,7 +72,7 @@ export function ConfirmDialog() {
 
 // -------------------------------------------------------------- shortcuts
 
-const SHORTCUTS: { keys: string[]; what: string }[] = [
+export const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ['Ctrl', 'O'], what: 'Add photos' },
   { keys: ['Ctrl', 'Shift', 'O'], what: 'Add a folder of photos' },
   { keys: ['Ctrl', 'V'], what: 'Paste a photo from the clipboard' },
@@ -118,11 +118,11 @@ export function DropOverlay() {
   if (!active) return null;
   return (
     <div className="fade-in pointer-events-none fixed inset-0 z-[55] flex items-center justify-center p-6" style={{ background: 'var(--scrim)', backdropFilter: 'blur(3px)' }}>
-      <div className="relative flex h-full max-h-[520px] w-full max-w-[720px] flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-accent bg-accent-soft/60 text-center">
+      <div className="relative flex h-full max-h-[520px] w-full max-w-[720px] flex-col items-center justify-center rounded-md border-2 border-dashed border-accent bg-accent-soft/60 text-center">
         <div className="relative mb-6 flex h-28 w-28 items-center justify-center">
           <span className="absolute inset-0 rounded-full border-2 border-accent/50" style={{ animation: 'gl-ring 1.8s ease-out infinite' }} />
           <span className="absolute inset-0 rounded-full border-2 border-accent/40" style={{ animation: 'gl-ring 1.8s ease-out 0.6s infinite' }} />
-          <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-accent text-accent-fg shadow-[0_18px_40px_rgb(79_110_247/0.45)]" style={{ animation: 'gl-float 2.4s ease-in-out infinite' }}>
+          <div className="relative flex h-20 w-20 items-center justify-center rounded-md bg-accent text-accent-fg " style={{ animation: 'gl-float 2.4s ease-in-out infinite' }}>
             <ImagePlus size={34} strokeWidth={1.7} />
           </div>
           <MapPin size={22} className="absolute -bottom-1 right-2 text-accent" fill="currentColor" fillOpacity={0.25} />

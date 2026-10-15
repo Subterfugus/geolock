@@ -124,3 +124,9 @@ export function deviceLabel(device: string | null | undefined): string {
 
 export const ANALYST_NAME: Record<'claude' | 'chatgpt', string> = { claude: 'Claude', chatgpt: 'ChatGPT' };
 export const ANALYST_COMPANY: Record<'claude' | 'chatgpt', string> = { claude: 'Anthropic', chatgpt: 'OpenAI' };
+
+const EFFORT_NAME: Record<string, string> = {
+  '': 'Default effort', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
+};
+/** "high" → "High"; "" → "Default effort". */
+export const effortLabel = (e: string | null | undefined) => EFFORT_NAME[e ?? ''] ?? (e ?? '');

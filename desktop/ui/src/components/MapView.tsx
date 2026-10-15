@@ -1,21 +1,24 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Globe, Map as MapIcon, Maximize2, Plus, Minus, Satellite, Wifi } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { GeoMap, mapHandle } from '../lib/map/mapController';
 import { getState, patch, toast, useStore } from '../lib/store';
-import { selectGuess } from '../lib/controller';
+import { selectGuess, updateSettings } from '../lib/controller';
 import type { MapStyleKind } from '../lib/types';
-import { IconButton, Segmented } from './ui';
+import { Button, IconButton, Segmented } from './ui';
 import { ATTRIBUTION } from '../lib/map/mapStyles';
 import { Welcome } from './Welcome';
 import { deviceLabel } from '../lib/format';
 import { Spinner } from './ui';
 
 const STYLE_OPTIONS: { value: MapStyleKind; label: ReactNode; title: string; disabled?: boolean }[] = [
-  { value: 'offline', label: <span className="flex items-center gap-1.5"><Globe size={13} />Offline</span>, title: 'Works without internet' },
-  { value: 'streets', label: <span className="flex items-center gap-1.5"><MapIcon size={13} />Streets</span>, title: 'Needs internet' },
-  { value: 'satellite', label: <span className="flex items-center gap-1.5"><Satellite size={13} />Satellite</span>, title: 'Needs internet' },
+  { value: 'streets', label: <span className="flex items-center gap-1.5"><MapIcon size={13} />Streets</span>, title: 'Roads, buildings, places and landmarks (OpenStreetMap). Needs internet.' },
+  { value: 'satellite', label: <span className="flex items-center gap-1.5"><Satellite size={13} />Satellite</span>, title: 'Aerial photos with roads and place names. Needs internet.' },
+  { value: 'offline', label: <span className="flex items-center gap-1.5"><Globe size={13} />Offline</span>, title: 'Countries and regions only. Works without internet.' },
 ];
+
+/** Past this zoom the offline map has nothing more to show. */
+const OFFLINE_DETAIL_ZOOM = 6.5;
 
 /** The full-height map. Result overlays are drawn for the selected photo. */
 export function MapView({ dim = false }: { dim?: boolean }) {
@@ -25,6 +28,7 @@ export function MapView({ dim = false }: { dim?: boolean }) {
   const result = useStore((s) => (s.selectedId ? s.results[s.selectedId] ?? null : null));
   const sel = useStore((s) => s.selectedGuess);
   const last = useRef<{ id: string | null; sel: number; obj: unknown }>({ id: null, sel: 0, obj: null });
+  const [deep, setDeep] = useState(false);
 
   // Create once. StrictMode mounts twice in development, so the instance is torn down on cleanup.
   useEffect(() => {
@@ -35,8 +39,9 @@ export function MapView({ dim = false }: { dim?: boolean }) {
       onGuessClick: (i) => selectGuess(i),
       onStyleFailed: () => {
         patch({ mapStyle: 'offline' });
-        toast('error', "Couldn't load that map", 'Streets and Satellite need an internet connection. Showing the offline map.');
+        toast('error', "Couldn't load the street map", 'Streets and Satellite need an internet connection. Showing the offline map for now.');
       },
+      onZoom: (z) => setDeep(z >= OFFLINE_DETAIL_ZOOM),
     }, { zoom: getState().status?.state === 'ready' ? 1.7 : 1.15 });
     mapHandle.current = map;
     const ro = new ResizeObserver(() => map.resize());
@@ -109,7 +114,7 @@ export function MapView({ dim = false }: { dim?: boolean }) {
               label="Map style"
               value={mapStyle}
               options={STYLE_OPTIONS}
-              onChange={(v) => patch({ mapStyle: v })}
+              onChange={(v) => { patch({ mapStyle: v }); void updateSettings({ map_style: v }); }}
             />
             {mapStyle !== 'offline' && (
               <div className="flex items-center gap-1 px-1.5 text-[11px] text-fg-3">
@@ -117,6 +122,15 @@ export function MapView({ dim = false }: { dim?: boolean }) {
               </div>
             )}
           </div>
+
+          {mapStyle === 'offline' && deep && (
+            <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 fade-in">
+              <div className="panel flex items-center gap-3 py-1.5 pl-3.5 pr-1.5 text-[12.5px] text-fg-2">
+                The offline map has no roads or landmarks.
+                <Button size="sm" variant="primary" onClick={() => patch({ mapStyle: 'streets' })}><MapIcon size={13} /> Show streets</Button>
+              </div>
+            </div>
+          )}
 
           <div className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-[10.5px] text-fg-3">
             <span className="rounded bg-bg/50 px-1.5 py-px backdrop-blur-sm">{ATTRIBUTION[mapStyle]}</span>

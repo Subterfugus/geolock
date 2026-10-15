@@ -24,7 +24,7 @@ export function Library() {
         <button
           type="button"
           onClick={() => void addPhotos()}
-          className="flex h-10 min-w-0 flex-1 items-center justify-between rounded-xl bg-accent px-3.5 text-[13.5px] font-semibold text-accent-fg shadow-[0_1px_0_rgb(255_255_255/0.2)_inset] transition-colors hover:bg-accent-strong active:scale-[0.99]"
+          className="flex h-10 min-w-0 flex-1 items-center justify-between rounded-md bg-accent px-3.5 text-[13.5px] font-semibold text-accent-fg transition-colors hover:bg-accent-strong active:translate-y-px"
         >
           <span className="flex items-center gap-2"><FolderInput size={16} /> Add photos</span>
           <span className="flex items-center gap-1 opacity-75"><Kbd>Ctrl</Kbd><Kbd>O</Kbd></span>
@@ -50,9 +50,10 @@ function Header() {
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
       <div className="flex min-w-0 items-center gap-2.5">
         <img src={LOGO_SRC} alt="" className="h-[26px] w-[26px] shrink-0" />
-        <span className="text-[15px] font-semibold tracking-[-0.02em]">GeoLock</span>
+        <span className="text-[15px] font-semibold tracking-[-0.01em]">GeoLock</span>
       </div>
       <div className="flex items-center">
+        <IconButton label="Settings (Ctrl+,)" onClick={() => patch({ settingsOpen: true })}><Settings size={16} /></IconButton>
         <LibraryExport />
         <IconButton label="Hide library" onClick={() => patch({ sidebarOpen: false })}>
           <PanelLeftClose size={17} />
@@ -331,16 +332,25 @@ function Footer() {
   const available = useStore((s) => s.status?.available_devices ?? []);
   return (
     <footer className="flex h-12 shrink-0 items-center justify-between gap-2 border-t border-border px-3">
-      <span
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[12px] text-fg-2"
-        title={available.length ? `Available processors: ${available.join(', ')}` : 'Where the AI models run'}
+      <button
+        type="button"
+        onClick={() => patch({ settingsOpen: true })}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-fg-2 hover:bg-surface-2"
+        title={available.length ? `Available processors: ${available.join(', ')}. Change in Settings.` : 'Where the AI models run'}
       >
         <Cpu size={13} className="shrink-0 text-accent" />
-        <span className="truncate">Running on {deviceLabel(device)}</span>
-      </span>
-      <div className="flex shrink-0 items-center">
+        <span className="truncate">{deviceLabel(device)}</span>
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
         <IconButton label="Keyboard shortcuts (?)" onClick={() => patch({ shortcutsOpen: true })}><Keyboard size={15} /></IconButton>
-        <IconButton label="Settings (Ctrl+,)" onClick={() => patch({ settingsOpen: true })}><Settings size={16} /></IconButton>
+        <button
+          type="button"
+          onClick={() => patch({ settingsOpen: true })}
+          title="Settings (Ctrl+,)"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border-strong px-2.5 text-[12.5px] font-medium text-fg transition-colors hover:bg-surface-3"
+        >
+          <Settings size={14} /> Settings
+        </button>
       </div>
     </footer>
   );

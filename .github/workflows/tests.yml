@@ -23,4 +23,4 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -e . pytest
-      - run: python -m pytest -q tests/test_analyst.py
+      - run: python -m pytest -q tests/test_analyst.py tests/test_settings.py

@@ -12,8 +12,8 @@ export const LOGO_SRC = './logo.svg';
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
 
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-accent-fg hover:bg-accent-strong shadow-[0_1px_0_rgb(255_255_255/0.18)_inset] disabled:bg-accent/40',
-  secondary: 'bg-surface-3 text-fg hover:bg-surface-3/70 border border-border',
+  primary: 'bg-accent text-accent-fg hover:bg-accent-strong font-semibold disabled:bg-accent/40',
+  secondary: 'bg-surface-2 text-fg hover:bg-surface-3 border border-border-strong',
   outline: 'border border-border-strong text-fg hover:bg-surface-3',
   ghost: 'text-fg-2 hover:text-fg hover:bg-surface-3',
   danger: 'bg-danger text-white hover:brightness-110 disabled:opacity-50',
@@ -26,11 +26,11 @@ export function Button({
     <button
       type="button"
       className={clsx(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap transition-colors duration-150',
-        'disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.985]',
+        'inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap transition-colors duration-150',
+        'disabled:cursor-not-allowed disabled:opacity-50 active:translate-y-px',
         size === 'sm' && 'h-7 px-2.5 text-[12px]',
         size === 'md' && 'h-8 px-3 text-[13px]',
-        size === 'lg' && 'h-11 px-5 text-[14.5px] rounded-xl',
+        size === 'lg' && 'h-11 px-5 text-[14.5px]',
         VARIANT[variant],
         className,
       )}
@@ -50,7 +50,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={clsx(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-2 transition-colors duration-150',
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-2 transition-colors duration-150',
         'hover:bg-surface-3 hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent',
         active && 'bg-surface-3 text-fg',
         className,
@@ -64,7 +64,7 @@ export function IconButton({
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] border border-border-strong bg-surface-2 px-1 font-sans text-[10.5px] font-medium text-fg-2 shadow-[0_1px_0_var(--border-strong)]">
+    <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[2px] border border-current/30 px-1 font-mono text-[10px] font-medium opacity-80">
       {children}
     </kbd>
   );
@@ -82,15 +82,15 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={clsx(
-        'relative inline-flex h-[20px] w-[36px] shrink-0 items-center rounded-full transition-colors duration-200',
-        checked ? 'bg-accent' : 'bg-border-strong',
+        'relative inline-flex h-[20px] w-[38px] shrink-0 items-center rounded-[3px] border transition-colors duration-200',
+        checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface-3',
         disabled && 'opacity-50',
       )}
     >
       <span
         className={clsx(
-          'inline-block h-[16px] w-[16px] rounded-full bg-white shadow transition-transform duration-200 ease-out',
-          checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
+          'inline-block h-[14px] w-[14px] rounded-[2px] transition-transform duration-200 ease-out',
+          checked ? 'translate-x-[20px] bg-accent-fg' : 'translate-x-[2px] bg-fg-3',
         )}
       />
     </button>
@@ -111,7 +111,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={clsx('inline-flex rounded-[10px] bg-surface-3 p-[3px]', fullWidth && 'flex w-full')}
+      className={clsx('inline-flex rounded-[4px] border border-border-strong bg-surface-2 p-[2px]', fullWidth && 'flex w-full')}
     >
       {options.map((o) => {
         const on = o.value === value;
@@ -125,9 +125,9 @@ export function Segmented<T extends string>({
             title={o.title}
             onClick={() => onChange(o.value)}
             className={clsx(
-              'flex-1 rounded-[7px] px-2.5 font-medium transition-all duration-150 whitespace-nowrap',
+              'flex-1 rounded-[2px] px-2.5 font-medium transition-colors duration-150 whitespace-nowrap',
               size === 'md' ? 'h-7 text-[12.5px]' : 'h-6 text-[12px]',
-              on ? 'bg-surface text-fg shadow-[var(--shadow-sm)]' : 'text-fg-2 hover:text-fg',
+              on ? 'bg-fg text-bg' : 'text-fg-2 hover:bg-surface-3 hover:text-fg',
               o.disabled && 'cursor-not-allowed opacity-40',
             )}
           >
@@ -152,46 +152,38 @@ export function ConfidencePill({ label, value, className }: { label: ConfidenceL
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-[2px] text-[11.5px] font-semibold tnum',
+        'inline-flex items-center gap-1.5 rounded-[3px] border border-border px-1.5 py-[1px] text-[11.5px] font-medium tnum',
         className,
       )}
       title={`${confidenceName(label)} confidence`}
     >
-      <span className={clsx('h-1.5 w-1.5 rounded-full', CONF_BG[label])} aria-hidden="true" />
+      <span className={clsx('h-1.5 w-1.5', CONF_BG[label])} aria-hidden="true" />
       <span className={CONF_TEXT[label]}>{pct(value)}</span>
     </span>
   );
 }
 
-/** Circular meter for the hero card. */
+/** The hero card's reading: a large monospaced percentage over a ten-step tick scale. */
 export function ConfidenceRing({ value, label, size = 68 }: { value: number; label: ConfidenceLabel; size?: number }) {
-  const stroke = 6;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
   const v = Math.max(0, Math.min(1, value));
-  const color = label === 'high' ? 'var(--high)' : label === 'medium' ? 'var(--medium)' : 'var(--low)';
+  const lit = Math.round(v * 10);
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={`${pct(value)} confidence`}>
-      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--ring-track)" strokeWidth={stroke} />
-        <circle
-          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - v)}
-          style={{ transition: 'stroke-dashoffset 600ms var(--ease-out)' }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-        <span className={clsx('text-[17px] font-semibold tnum', CONF_TEXT[label])}>{pct(value)}</span>
-      </div>
+    <div className="flex shrink-0 flex-col items-end gap-1.5" style={{ minWidth: size + 12 }} role="img" aria-label={`${pct(value)} confidence`}>
+      <span className={clsx('mono text-[30px] font-medium leading-none', CONF_TEXT[label])}>{pct(value)}</span>
+      <span className="flex gap-[2px]" aria-hidden="true">
+        {Array.from({ length: 10 }, (_, i) => (
+          <span key={i} className={clsx('h-[7px] w-[6px]', i < lit ? CONF_BG[label] : 'bg-surface-3')} />
+        ))}
+      </span>
     </div>
   );
 }
 
 export function Meter({ value, label, className }: { value: number; label: ConfidenceLabel; className?: string }) {
   return (
-    <div className={clsx('h-1.5 w-full overflow-hidden rounded-full bg-surface-3', className)}>
+    <div className={clsx('h-1 w-full overflow-hidden bg-surface-3', className)}>
       <div
-        className={clsx('h-full rounded-full transition-[width] duration-500 ease-out', CONF_BG[label])}
+        className={clsx('h-full transition-[width] duration-500 ease-out', CONF_BG[label])}
         style={{ width: `${Math.max(2, Math.min(100, value * 100))}%` }}
       />
     </div>
@@ -216,8 +208,9 @@ export function Flag({ code }: { code: string | null | undefined }) {
 
 export function SectionTitle({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
-    <div className="mb-2 flex items-center justify-between gap-2">
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-3">{children}</h3>
+    <div className="mb-2.5 flex items-center gap-2.5">
+      <h3 className="eyebrow shrink-0">{children}</h3>
+      <span className="h-px flex-1 bg-border" aria-hidden="true" />
       {aside}
     </div>
   );
@@ -261,7 +254,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledById}
-        className="pop-in flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow)] outline-none"
+        className="pop-in flex max-h-full w-full flex-col overflow-hidden rounded-md border border-border-strong bg-surface shadow-[var(--shadow)] outline-none"
         style={{ maxWidth: width }}
       >
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -277,4 +270,34 @@ export function Dialog({
 
 export function Skeleton({ className }: { className?: string }) {
   return <div className={clsx('skeleton', className)} aria-hidden="true" />;
+}
+
+/** A native select (keyboard and screen-reader friendly) dressed to match the other controls. */
+export function Select<T extends string>({
+  value, options, onChange, label, className, disabled, title,
+}: {
+  value: T;
+  options: { value: T; label: string; title?: string }[];
+  onChange: (v: T) => void;
+  label: string;
+  className?: string;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <span className={clsx('relative inline-flex min-w-0', className)} title={title}>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value as T)}
+        className="h-7 w-full min-w-0 cursor-pointer appearance-none truncate rounded-[3px] border border-border-strong bg-surface pl-2 pr-6 text-[12px] text-fg outline-none transition-colors hover:border-fg-3 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {options.map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+      </select>
+      <svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-fg-3">
+        <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    </span>
+  );
 }

@@ -41,7 +41,7 @@ is absent.
 {
   "state": "needs_setup",          // needs_setup | setting_up | loading | ready | error
   "error": null,                   // message when state == "error"
-  "version": "0.3.1",
+  "version": "0.4.0",
   "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
   "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
   "available_devices": ["CPU", "GPU", "NPU"],
@@ -121,6 +121,37 @@ Stops a running setup; the partial download is kept for resuming.
 Uses models from an existing GeoLock install (the folder with `clip_vision.xml`). Copies
 what is needed. 400 with a readable message if the folder is not a GeoLock models folder.
 
+## Second opinion: models, progress, stop
+
+### `GET /api/analysts/models` (`?refresh=true` to ask the CLIs again; cached 10 min)
+```json
+{"claude":  {"installed": true, "efforts": ["low", "medium", "high", "xhigh", "max"],
+             "models": [{"id": "", "name": "Default", "description": "What Claude Code uses for your plan"},
+                        {"id": "opus", "name": "Opus", "description": "The latest Opus model"}]},
+ "chatgpt": {"installed": true, "efforts": ["low", "medium", "high", "xhigh", "max"],
+             "models": [{"id": "", "name": "Default", "description": "What your Codex settings pick"},
+                        {"id": "gpt-6.1-sol", "name": "GPT-6.1-Sol", "description": "…",
+                         "efforts": ["low", "medium", "high", "xhigh", "max"], "default_effort": "low"}]}}
+```
+`id: ""` means the CLI's own default. The chosen model and effort are settings
+(`claude_model`, `claude_effort`, `chatgpt_model`, `chatgpt_effort`; effort is `""` or
+one of minimal, low, medium, high, xhigh, max) and apply to every ask.
+
+### `GET /api/analysts/progress`
+What the analysts of the current (or last) ask are doing. Polled by the UI while it waits.
+```json
+{"running": true, "now": 1760000012.3,
+ "providers": {"claude": {"stage": "thinking", "started": 1760000003.1, "updated": 1760000012.1,
+                          "model": "claude-opus-5-5", "effort": "high",
+                          "note": "Reading the shop sign in the second crop", "chars": 2600, "error": null}}}
+```
+`stage`: preparing → starting → thinking → writing → done | error | stopped. `note` is the
+latest line of the model's thinking when the CLI shares it (may be empty).
+
+### `POST /api/analysts/stop` → `{"stopped": 1}`
+Ends the running analysts (the CLI and its child processes). The ask then returns with that
+analyst's earlier answer if the photo had one, else an answer with `ok: false, stopped: true`.
+
 ## Locating photos
 
 ### `POST /api/locate`  (multipart form)
@@ -177,7 +208,7 @@ Returns a **Result** (below) and stores it in the library. Takes 1-5 s locally, 
   //   box is in original-image pixel coordinates (4 corners)
   "analysts": [
     {"provider": "claude", "name": "Claude", "via": "Claude Code, your Claude login", "ok": true,
-     "error": null, "model": "claude-opus-5-5", "ms": 8400,
+     "error": null, "model": "claude-opus-5-5", "effort": "high", "ms": 8400,
      "reasoning": "Haussmann façades, Paris street signs…",
      "checklist": [{"category": "signs", "label": "Signs",
                     "seen": "Blue enamel street plate", "suggests": "Paris"}],
@@ -243,7 +274,12 @@ browser dev mode the UI downloads the file instead and never calls this.
   "share_findings": true,      // default for share_local when asking an analyst
   "keep_history": true,        // false: results are not stored (the current session still shows them)
   "theme": "system",           // system | light | dark (the UI applies it)
-  "map_style": "offline"       // offline | streets | satellite (UI default)
+  "map_style": "streets",      // streets | satellite | offline (the map shown; offline is the automatic fallback)
+  "claude_model": "",          // "" = the CLI's default, else an id from /api/analysts/models
+  "claude_effort": "",         // "" | minimal | low | medium | high | xhigh | max
+  "chatgpt_model": "",
+  "chatgpt_effort": "",
+  "settings_rev": 2            // read-only; 0.3 settings with map_style "offline" are moved to "streets" once
 }
 ```
 There is deliberately **no** setting that asks Claude or ChatGPT automatically.

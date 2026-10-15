@@ -96,6 +96,8 @@ export interface SetupInfo {
   error: string | null;
 }
 
+export type Effort = '' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface Settings {
   device: 'AUTO' | DeviceName;
   read_text: boolean;
@@ -104,6 +106,46 @@ export interface Settings {
   keep_history: boolean;
   theme: ThemeMode;
   map_style: MapStyleKind;
+  /** "" = the CLI's own default model / effort. */
+  claude_model: string;
+  claude_effort: Effort;
+  chatgpt_model: string;
+  chatgpt_effort: Effort;
+}
+
+/** GET /api/analysts/models: what the installed claude / codex CLIs accept. */
+export interface ModelChoice {
+  id: string;
+  name: string;
+  description?: string;
+  /** Codex models list their own effort levels; absent = the provider's list. */
+  efforts?: Effort[];
+  default_effort?: string | null;
+}
+export interface ProviderModels {
+  installed: boolean;
+  models: ModelChoice[];
+  efforts: Effort[];
+}
+export type ModelOptions = Record<Provider, ProviderModels>;
+
+export type AnalystStage = 'preparing' | 'starting' | 'thinking' | 'writing' | 'done' | 'error' | 'stopped';
+export interface AnalystLive {
+  stage: AnalystStage;
+  /** Seconds since the epoch (backend clock, same machine). */
+  started: number;
+  updated: number;
+  model: string | null;
+  effort: string | null;
+  /** The latest line of the model's thinking, when the CLI shares it. */
+  note: string;
+  chars: number;
+  error: string | null;
+}
+export interface AnalystProgress {
+  running: boolean;
+  now: number;
+  providers: Partial<Record<Provider, AnalystLive>>;
 }
 
 export interface Place {
@@ -206,6 +248,9 @@ export interface Analyst {
   ok: boolean;
   error: string | null;
   model: string | null;
+  effort?: string | null;
+  /** The user pressed Stop before it answered. */
+  stopped?: boolean;
   ms: number | null;
   reasoning: string;
   /** Absent on answers saved before 2026-10-15 (they only have clues). */

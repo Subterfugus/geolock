@@ -8,6 +8,7 @@ settings.json
 """
 import io
 import json
+import re
 import secrets
 import shutil
 import threading
@@ -29,10 +30,19 @@ DEFAULT_SETTINGS = {
     "share_findings": True,
     "keep_history": True,
     "theme": "system",
-    "map_style": "offline",
+    "map_style": "streets",
+    "claude_model": "",       # "" = the CLI's own default; else an alias or model name
+    "claude_effort": "",      # "" = default; else low | medium | high | xhigh | max
+    "chatgpt_model": "",
+    "chatgpt_effort": "",
+    "settings_rev": 2,
 }
 _CHOICES = {"device": ("AUTO", "GPU", "NPU", "CPU"), "theme": ("system", "light", "dark"),
-            "map_style": ("offline", "streets", "satellite")}
+            "map_style": ("offline", "streets", "satellite"),
+            "claude_effort": ("", "minimal", "low", "medium", "high", "xhigh", "max"),
+            "chatgpt_effort": ("", "minimal", "low", "medium", "high", "xhigh", "max")}
+# Model names go on a command line: letters, digits and . _ - : [ ] only, never a leading "-".
+_MODEL = re.compile(r"^(|[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,79})$")
 
 
 class Settings:
@@ -44,17 +54,28 @@ class Settings:
         except Exception:
             stored = {}
         self.values = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in DEFAULT_SETTINGS}}
+        if stored and stored.get("settings_rev", 1) < 2:
+            # 0.3 saved the offline map as everyone's default; streets (with offline as the
+            # automatic fallback) is the default now.
+            if self.values["map_style"] == "offline":
+                self.values["map_style"] = "streets"
+            self.values["settings_rev"] = 2
 
     def update(self, changes):
         with self.lock:
             for k, v in (changes or {}).items():
-                if k not in DEFAULT_SETTINGS:
+                if k not in DEFAULT_SETTINGS or k == "settings_rev":
                     continue
-                if isinstance(DEFAULT_SETTINGS[k], bool):
+                if k.endswith("_model"):
+                    v = str(v or "").strip()
+                    if not _MODEL.match(v):
+                        raise ValueError(f"{k}: not a model name")
+                elif isinstance(DEFAULT_SETTINGS[k], bool):
                     v = bool(v)
                 elif k in _CHOICES:
                     v = str(v)
                     v = v.upper() if k == "device" else v.lower()
+                    v = "" if v == "default" else v
                     if v not in _CHOICES[k]:
                         raise ValueError(f"{k} must be one of {', '.join(_CHOICES[k])}")
                 self.values[k] = v

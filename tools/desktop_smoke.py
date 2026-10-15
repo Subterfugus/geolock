@@ -111,6 +111,27 @@ def run_save(port, folder):
     print(f"save: wrote {res['bytes']} bytes to {target.name}, refused .exe", flush=True)
 
 
+def run_analyst_api(port):
+    """Second-opinion controls in the frozen backend: model lists, settings, progress, stop.
+    Never asks a real analyst (the runner has no Claude or ChatGPT login anyway)."""
+    m = call(port, "/api/analysts/models", timeout=90)
+    assert m["claude"]["models"][0]["id"] == "" and m["chatgpt"]["models"][0]["id"] == "", m
+    s = call(port, "/api/settings", "PUT", json.dumps({"claude_model": "opus", "claude_effort": "high"}).encode(),
+             "application/json")
+    assert s["claude_model"] == "opus" and s["claude_effort"] == "high" and s["map_style"] == "streets", s
+    try:
+        call(port, "/api/settings", "PUT", json.dumps({"claude_model": "--bad"}).encode(), "application/json")
+        raise SystemExit("settings accepted a flag as a model name")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    call(port, "/api/settings", "PUT", json.dumps({"claude_model": "", "claude_effort": ""}).encode(), "application/json")
+    p = call(port, "/api/analysts/progress")
+    assert p["running"] is False and isinstance(p["providers"], dict), p
+    assert call(port, "/api/analysts/stop", "POST", b"")["stopped"] == 0
+    print(f"analyst api: claude models {[x['id'] for x in m['claude']['models']]}, "
+          f"chatgpt models {len(m['chatgpt']['models'])}, progress and stop answer", flush=True)
+
+
 def run_devices(port):
     """Diagnostics, the speed test, and the CPU fallback when the chosen device is missing
     (the CI runner has no NPU, so choosing it must fall back to the CPU and say so)."""
@@ -186,6 +207,7 @@ def main():
         run_setup(port)
         run_locate(port)
         run_save(port, data_dir)
+        run_analyst_api(port)
         run_devices(port)
         ok = True
     finally:

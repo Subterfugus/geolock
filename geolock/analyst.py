@@ -23,7 +23,9 @@ import os
 import shutil
 import subprocess
 import sys
+import re
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -137,6 +139,161 @@ SCHEMA = {
                 "why": _STR}}},
     },
 }
+
+# ------------------------------------------------------------------ live progress
+EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+_FINISHED = ("done", "error", "stopped")
+
+
+class Stopped(Exception):
+    """The user pressed Stop while an analyst was working."""
+
+
+class Progress:
+    """What each analyst is doing right now (for the app's progress card), and a Stop switch.
+
+    Stages: preparing (cutting crops) -> starting (CLI launched, waiting for the model)
+    -> thinking -> writing (the answer) -> done | error | stopped."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.state = {}
+        self.stop = threading.Event()
+        self.procs = set()
+        self.armed = False  # begin() ran at the start of the request; keep a Stop pressed since
+
+    def begin(self, providers, options=None, request_start=False):
+        """Reset for a new ask. The desktop backend calls it with request_start=True when the
+        request arrives (before GeoLock's own analysis), so Stop works from the first moment;
+        ask_all() then keeps a Stop pressed in between instead of clearing it."""
+        options = options or {}
+        now = time.time()
+        with self.lock:
+            if request_start or not self.armed:
+                self.stop.clear()
+            self.armed = request_start
+            self.state = {p: {"stage": "preparing", "started": now, "updated": now,
+                              "model": (options.get(p) or {}).get("model") or None,
+                              "effort": (options.get(p) or {}).get("effort") or None,
+                              "note": "", "chars": 0, "error": None} for p in providers}
+
+    def set(self, provider, **kw):
+        with self.lock:
+            st = self.state.get(provider)
+            if st is None or st["stage"] in _FINISHED:
+                return
+            if kw.get("note"):
+                kw["note"] = _last_thought(kw["note"])
+            st.update({k: v for k, v in kw.items() if v is not None}, updated=time.time())
+
+    def add_chars(self, provider, n):
+        with self.lock:
+            st = self.state.get(provider)
+            if st is not None:
+                st["chars"] += n
+
+    def finish(self, provider, stage, error=None):
+        with self.lock:
+            st = self.state.get(provider)
+            if st is not None:
+                st.update(stage=stage, error=error, updated=time.time())
+
+    def snapshot(self):
+        with self.lock:
+            prov = {p: dict(v) for p, v in self.state.items()}
+        return {"running": any(v["stage"] not in _FINISHED for v in prov.values()),
+                "now": time.time(), "providers": prov}
+
+    def cancel(self):
+        """Stop every running analyst. Returns how many were still working."""
+        self.stop.set()
+        with self.lock:
+            procs = list(self.procs)
+        for proc in procs:
+            _kill(proc)
+        return sum(1 for v in self.snapshot()["providers"].values() if v["stage"] not in _FINISHED)
+
+
+PROGRESS = Progress()
+
+
+def _last_thought(text):
+    """The latest complete line of a model's thinking, short enough for one line of UI."""
+    lines = [l.strip(" *#-\t") for l in str(text).splitlines() if l.strip(" *#-\t")]
+    line = lines[-1] if lines else ""
+    return line if len(line) <= 160 else "…" + line[-159:]
+
+
+def _kill(proc):
+    """End a CLI and everything it started (Codex and Claude Code spawn helpers)."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True,
+                           creationflags=0x08000000, timeout=10)
+        else:
+            import signal
+            os.killpg(proc.pid, signal.SIGKILL)  # the CLI's whole process group
+        proc.kill()
+    except Exception:
+        pass
+
+
+def _run_live(cmd, stdin=None, cwd=None, timeout=TIMEOUT_S, on_line=None):
+    """Like _run, but hands each stdout line to on_line as it arrives and honours Stop."""
+    kw = {}
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    else:
+        kw["start_new_session"] = True  # own process group, so Stop can end its helpers too
+    if PROGRESS.stop.is_set():
+        raise Stopped()
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=cwd, text=True, encoding="utf-8",
+                            errors="replace", **kw)
+    with PROGRESS.lock:
+        PROGRESS.procs.add(proc)
+    out, err = [], []
+
+    def feed():
+        try:
+            if stdin:
+                proc.stdin.write(stdin)
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    def read_out():
+        for line in proc.stdout:
+            out.append(line)
+            if on_line:
+                try:
+                    on_line(line)
+                except Exception:
+                    pass  # progress is best-effort; the answer is what matters
+
+    threads = [threading.Thread(target=f, daemon=True) for f in
+               (feed, read_out, lambda: err.append(proc.stderr.read()))]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + timeout
+    try:
+        while proc.poll() is None:
+            if PROGRESS.stop.is_set():
+                _kill(proc)
+                raise Stopped()
+            if time.monotonic() > deadline:
+                _kill(proc)
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            time.sleep(0.1)
+        for t in threads:
+            t.join(timeout=5)
+        if PROGRESS.stop.is_set() and proc.returncode != 0:
+            raise Stopped()  # killed by cancel() between two polls
+    finally:
+        with PROGRESS.lock:
+            PROGRESS.procs.discard(proc)
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out), "".join(err))
+
 
 # ------------------------------------------------------------------ helpers
 def _run(cmd, stdin=None, cwd=None, timeout=TIMEOUT_S):
@@ -344,7 +501,7 @@ def _image_blocks(jpegs):
                                          "data": base64.b64encode(j).decode()}} for j in jpegs]
 
 
-def _ask_claude_code(jpegs, prompt, model=None):
+def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
     exe = _find_cli("claude")
     msg = {"type": "user", "message": {"role": "user", "content":
            _image_blocks(jpegs) + [{"type": "text", "text": prompt}]}}
@@ -352,14 +509,43 @@ def _ask_claude_code(jpegs, prompt, model=None):
             "--verbose"]
     extra = ["--no-session-persistence", "--tools", "", "--setting-sources", "",
              "--strict-mcp-config", "--system-prompt", SYSTEM,
-             "--json-schema", json.dumps(SCHEMA, separators=(",", ":"))]
+             "--json-schema", json.dumps(SCHEMA, separators=(",", ":")),
+             "--include-partial-messages"]
     model = model or os.environ.get("GEOLOCK_CLAUDE_MODEL")
     if model:
         base += ["--model", model]
+    if effort:
+        extra += ["--effort", effort]
+    thinking = []
+
+    def on_line(line):
+        ev = json.loads(line)
+        kind = ev.get("type")
+        if kind == "system" and ev.get("subtype") == "init":
+            PROGRESS.set(provider, stage="starting", model=ev.get("model"))
+        elif kind == "assistant":
+            PROGRESS.set(provider, model=(ev.get("message") or {}).get("model"))
+        elif kind == "stream_event":
+            e = ev.get("event") or {}
+            if e.get("type") == "message_start":
+                PROGRESS.set(provider, stage="thinking", model=(e.get("message") or {}).get("model"))
+            elif e.get("type") == "content_block_start":
+                block = (e.get("content_block") or {}).get("type")
+                PROGRESS.set(provider, stage="thinking" if block in ("thinking", "redacted_thinking") else "writing")
+            elif e.get("type") == "content_block_delta":
+                d = e.get("delta") or {}
+                piece = d.get("thinking") or d.get("text") or d.get("partial_json") or ""
+                PROGRESS.add_chars(provider, len(piece))
+                if d.get("type") == "thinking_delta":
+                    thinking.append(piece)
+                    PROGRESS.set(provider, stage="thinking", note="".join(thinking)[-600:])
+                elif piece:
+                    PROGRESS.set(provider, stage="writing")
+
     with tempfile.TemporaryDirectory(prefix="geolock-") as tmp:  # no CLAUDE.md to pick up
-        p = _run(base + extra, stdin=json.dumps(msg) + "\n", cwd=tmp)
+        p = _run_live(base + extra, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line)
         if _unknown_flag(p):  # older Claude Code: plain run, JSON from the text
-            p = _run(base, stdin=json.dumps(msg) + "\n", cwd=tmp)
+            p = _run_live(base, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line)
     result, used_model = None, None
     for line in p.stdout.splitlines():
         try:
@@ -378,10 +564,13 @@ def _ask_claude_code(jpegs, prompt, model=None):
     return data, result.get("result") or "", used_model
 
 
-def _ask_anthropic_api(jpegs, prompt, model=None):
+def _ask_anthropic_api(jpegs, prompt, model=None, effort=None, provider="claude"):
     import anthropic
     client = anthropic.Anthropic()
     model = model or os.environ.get("GEOLOCK_CLAUDE_MODEL") or "claude-opus-5-5"
+    model = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5",
+             "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-1"}.get(model, model)
+    PROGRESS.set(provider, stage="thinking", model=model)
     r = client.messages.create(
         model=model, max_tokens=16000, system=SYSTEM,
         output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
@@ -393,9 +582,29 @@ def _ask_anthropic_api(jpegs, prompt, model=None):
     return parse(text), text, r.model
 
 
-def _ask_codex(jpegs, prompt, model=None):
+def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt"):
     exe = _find_cli("codex")
     model = model or os.environ.get("GEOLOCK_CODEX_MODEL")
+
+    def on_line(line):
+        ev = json.loads(line)
+        kind = str(ev.get("type", ""))
+        if kind in ("thread.started", "turn.started"):
+            PROGRESS.set(provider, stage="thinking")
+        elif kind.startswith("item."):
+            item = ev.get("item") or {}
+            text = str(item.get("text") or "")
+            if item.get("type") == "reasoning":
+                PROGRESS.set(provider, stage="thinking", note=text)
+                if kind == "item.completed":
+                    PROGRESS.add_chars(provider, len(text))
+            elif item.get("type") == "agent_message":
+                PROGRESS.set(provider, stage="writing")
+                if kind == "item.completed":
+                    PROGRESS.add_chars(provider, len(text))
+        elif kind == "error":
+            PROGRESS.set(provider, note=str(ev.get("message") or ""))
+
     with tempfile.TemporaryDirectory(prefix="geolock-") as tmp:
         schema, out = (os.path.join(tmp, n) for n in ("schema.json", "answer.json"))
         imgs = []
@@ -411,10 +620,14 @@ def _ask_codex(jpegs, prompt, model=None):
         base += ["--output-last-message", out, "--color", "never"]
         if model:
             base += ["--model", model]
+        if effort:
+            base += ["-c", f'model_reasoning_effort="{effort}"']
         prompt = SYSTEM + "\n\n" + prompt
-        p = _run(base + ["--ephemeral", "--output-schema", schema, "-"], stdin=prompt, cwd=tmp)
+        PROGRESS.set(provider, stage="starting")
+        p = _run_live(base + ["--ephemeral", "--json", "-c", 'model_reasoning_summary="auto"',
+                              "--output-schema", schema, "-"], stdin=prompt, cwd=tmp, on_line=on_line)
         if _unknown_flag(p):  # older Codex CLI
-            p = _run(base + ["-"], stdin=prompt, cwd=tmp)
+            p = _run_live(base + ["-"], stdin=prompt, cwd=tmp, on_line=on_line)
         text = open(out, encoding="utf-8").read() if os.path.exists(out) else ""
     if not text.strip():
         raise RuntimeError((p.stderr or p.stdout or f"codex exited with {p.returncode}").strip()[-400:])
@@ -470,49 +683,135 @@ def clean(data):
             "text_seen": str(data.get("text_seen", ""))[:400], "guesses": guesses[:5]}
 
 
-def ask(provider, img, briefing=None, status=None, crops=None):
+def ask(provider, img, briefing=None, status=None, crops=None, model=None, effort=None):
     """One analyst's answer as a JSON-ready dict; never raises.
-    crops: from sign_crops(); sent after the whole photo as zoomed views of the text."""
+    crops: from sign_crops(); sent after the whole photo as zoomed views of the text.
+    model, effort: passed to the CLI (empty = the CLI's own default)."""
     status = status or detect()[provider]
     crops = crops or []
+    effort = effort if effort in EFFORTS else None
     out = {"provider": provider, "name": NAMES[provider], "via": status.get("detail"),
-           "ok": False, "error": None, "model": None, "ms": None,
+           "ok": False, "error": None, "model": None, "effort": effort, "ms": None,
            "crops": [{"box": c["box"], "text": c["text"]} for c in crops]}
     if not status.get("available"):
         out["error"] = status.get("detail")
+        PROGRESS.finish(provider, "error", out["error"])
         return out
     t = time.perf_counter()
     try:
         jpegs = [photo_jpeg(img)] + [c["jpeg"] for c in crops]
-        data, raw, model = BACKENDS[status["via"]](jpegs, prompt_text(briefing, crops))
+        PROGRESS.set(provider, stage="starting")
+        data, raw, used = BACKENDS[status["via"]](jpegs, prompt_text(briefing, crops),
+                                                  model=model or None, effort=effort,
+                                                  provider=provider)
         data = clean(data)
-        out["model"] = model
+        out["model"] = used or model or None
         if not data or not data["guesses"]:
             out["error"] = "No usable answer. " + (raw or "")[:300]
         else:
             out.update(data, ok=True)
+    except Stopped:
+        out["error"], out["stopped"] = "Stopped before it answered.", True
     except subprocess.TimeoutExpired:
         out["error"] = f"No answer within {TIMEOUT_S} s."
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"[:500]
     out["ms"] = round((time.perf_counter() - t) * 1000)
+    PROGRESS.finish(provider, "done" if out["ok"] else "stopped" if out.get("stopped") else "error",
+                    out["error"])
     return out
 
 
-def ask_all(providers, img, briefing=None, ocr_lines=None):
+def ask_all(providers, img, briefing=None, ocr_lines=None, options=None):
     """Ask each provider in parallel. ocr_lines: GeoLock's OCR result, used to cut zoomed
-    crops of the signs (sent whether or not the briefing is shared: they are the photo)."""
+    crops of the signs (sent whether or not the briefing is shared: they are the photo).
+    options: {"claude": {"model": "opus", "effort": "high"}, ...}"""
     providers = [p for p in dict.fromkeys(providers) if p in NAMES]
     if not providers:
         return []
+    options = options or {}
+    PROGRESS.begin(providers, options)
     status = detect()
     try:
         crops = sign_crops(img, ocr_lines) if ocr_lines and MAX_CROPS > 0 else []
     except Exception:  # a bad box must never cost the user their answer
         crops = []
     with ThreadPoolExecutor(len(providers)) as ex:
-        futs = [ex.submit(ask, p, img, briefing, status[p], crops) for p in providers]
+        futs = [ex.submit(ask, p, img, briefing, status[p], crops,
+                          (options.get(p) or {}).get("model"), (options.get(p) or {}).get("effort"))
+                for p in providers]
         return [f.result() for f in futs]
+
+
+# ------------------------------------------------------------------ model lists
+_models_cache = {"t": 0.0, "value": None}
+CLAUDE_ALIASES = {"fable": "Fable", "opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku"}
+
+
+def _claude_models():
+    """Model aliases and effort levels the installed Claude Code accepts (from its --help)."""
+    models = [{"id": "", "name": "Default", "description": "What Claude Code uses for your plan"}]
+    efforts = ["low", "medium", "high", "xhigh", "max"]
+    aliases = ["opus", "sonnet", "haiku"]
+    exe = _find_cli("claude")
+    if exe:
+        try:
+            text = " ".join(_run([exe, "--help"], timeout=30).stdout.split())
+            m = re.search(r"--effort <level> [^(]*\(([a-z, ]+)\)", text)
+            if m:
+                efforts = [e.strip() for e in m.group(1).split(",") if e.strip()]
+            m = re.search(r"--model <model> .*?\(e\.g\. ([^)]*)\)", text)
+            if m:
+                named = re.findall(r"'([a-z][a-z0-9-]*)'", m.group(1))
+                aliases = list(dict.fromkeys(named + aliases))
+        except Exception:
+            pass
+    for a in aliases:
+        name = CLAUDE_ALIASES.get(a, a.capitalize())
+        models.append({"id": a, "name": name, "description": f"The latest {name} model"})
+    return {"models": models, "efforts": [e for e in efforts if e in EFFORTS],
+            "installed": bool(exe)}
+
+
+def _chatgpt_models():
+    """The models the installed Codex CLI lists (its own catalogue), with their effort levels."""
+    models = [{"id": "", "name": "Default", "description": "What your Codex settings pick"}]
+    efforts = ["low", "medium", "high", "xhigh"]
+    exe = _find_cli("codex")
+    if exe:
+        catalogue = None
+        for extra in ([], ["--bundled"]):
+            try:
+                p = _run([exe, "debug", "models", *extra], timeout=30)
+                catalogue = json.loads(p.stdout).get("models")
+                if catalogue:
+                    break
+            except Exception:
+                continue
+        for m in sorted(catalogue or [], key=lambda m: m.get("priority", 999)):
+            if m.get("visibility") not in (None, "list") or not m.get("slug"):
+                continue
+            if "image" not in (m.get("input_modalities") or ["image"]):
+                continue  # GeoLock sends a photo
+            levels = [l.get("effort") for l in m.get("supported_reasoning_levels") or []]
+            models.append({"id": m["slug"], "name": m.get("display_name") or m["slug"],
+                           "description": m.get("description") or "",
+                           "efforts": [l for l in levels if l in EFFORTS],
+                           "default_effort": m.get("default_reasoning_level")})
+        all_levels = [l for m in models[1:] for l in m.get("efforts", [])]
+        if all_levels:
+            efforts = [e for e in EFFORTS if e in all_levels]
+    return {"models": models, "efforts": efforts, "installed": bool(exe)}
+
+
+def model_options(refresh=False):
+    """{"claude": {"models": [...], "efforts": [...]}, "chatgpt": {...}}. Cached 10 min."""
+    if refresh or _models_cache["value"] is None or time.time() - _models_cache["t"] > 600:
+        with ThreadPoolExecutor(2) as ex:
+            c, g = ex.submit(_claude_models), ex.submit(_chatgpt_models)
+            _models_cache["value"] = {"claude": c.result(), "chatgpt": g.result()}
+        _models_cache["t"] = time.time()
+    return _models_cache["value"]
 
 
 # ------------------------------------------------------------------ fusion
