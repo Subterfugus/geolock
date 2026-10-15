@@ -368,7 +368,8 @@ class Geolocator:
             from .analyst import analyst_clues, ask_all
             t = time.perf_counter()
             if ask:
-                analysts += ask_all(ask, im, self.briefing(ev, meta) if share_local else None)
+                analysts += ask_all(ask, im, self.briefing(ev, meta) if share_local else None,
+                                    ocr_lines=ev["ocr"])
             for a in analysts:
                 ev["clues"] += analyst_clues(a, codes, self.geo.country_name)
                 for g in a.get("guesses", []):

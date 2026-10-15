@@ -152,10 +152,19 @@ Returns a **Result** (below) and stores it in the library. Takes 1-5 s locally, 
     {"provider": "claude", "name": "Claude", "via": "Claude Code, your Claude login", "ok": true,
      "error": null, "model": "claude-opus-5-5", "ms": 8400,
      "reasoning": "Haussmann façades, Paris street signs…",
-     "clues": [{"clue": "Blue enamel street sign", "suggests": "Paris"}],
+     "checklist": [{"category": "signs", "label": "Signs",
+                    "seen": "Blue enamel street plate", "suggests": "Paris"}],
+     //   category: driving_side | road_markings | signs | bollards | plates | poles
+     //             | script_language | architecture | vegetation | terrain_soil | sun_climate | other
+     //   absent on answers saved before 2026-10-15 (they only have "clues")
+     "ruled_out": [{"place": "Brussels", "why": "Signs would be bilingual"}],
+     "crops": [{"box": [330, 700, 1880, 950], "text": "BOULANGERIE"}],
+     //   zoomed crops sent with the photo: [x0, y0, x1, y1] in result-image pixels, OCR text
+     "clues": [{"clue": "Signs: Blue enamel street plate", "suggests": "Paris"}],  // flat list
      "driving_side": "right", "text_seen": "Rue de Rivoli",
      "guesses": [{"place": "Rue de Rivoli, Paris", "country": "France", "iso2": "FR",
-                  "lat": 48.8606, "lon": 2.3376, "radius_km": 2, "confidence": 0.7, "km_from_exif": 1.1}]}
+                  "lat": 48.8606, "lon": 2.3376, "radius_km": 2, "confidence": 0.7,
+                  "why": "The street sign names Rue de Rivoli", "km_from_exif": 1.1}]}
   ],
   "heat": [[48.85, 2.35, 1.0], [45.76, 4.83, 0.31]],   // [lat, lon, weight 0..1], up to 1500 points
   "exif": {"camera": "Apple iPhone 15", "datetime": "2026:07:03 14:22:10", "utc_offset": "+02:00",

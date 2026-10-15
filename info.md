@@ -20,7 +20,7 @@ confidence and the clues for each guess.
 | Engine (CLIP + GeoCLIP on OpenVINO, fusion, clustering, refinement) | Built; **run with the real CLIP ViT-L/14 weights** (all tests pass) |
 | Clues: OCR + language, domains, phone codes, currency, mph, script, scene, EXIF time zone | Built and unit-tested |
 | Deep analysis with a local vision-language model | Built but **not part of the plan** (Brady, 2026-10-14): the Claude / ChatGPT second opinion covers this; never run |
-| Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). Accuracy gain not yet measured |
+| Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). 2026-10-15: geoguessing checklist prompt and zoomed sign crops (fake CLIs only so far). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
 | **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Built (PR #11). Backend frozen and smoke-tested on a Windows CI runner with the real model download; installer built in CI. Not yet run on the laptop |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
@@ -100,8 +100,8 @@ only:
   base64 image block on stdin; the answer comes back as `structured_output` in the
   `result` event. Login check: `claude auth status --json` (`loggedIn`).
 - ChatGPT: `codex exec --skip-git-repo-check --sandbox read-only --ephemeral -C <tmp>
-  --image photo.jpg --output-schema schema.json --output-last-message answer.json -`
-  with the prompt on stdin. Login check: `codex login status` (exit code 0).
+  --image photo.jpg [--image crop1.jpg …] --output-schema schema.json
+  --output-last-message answer.json -` with the prompt on stdin. Login check: `codex login status` (exit code 0).
 - Fallbacks: no Claude Code but `ANTHROPIC_API_KEY` set and `anthropic` installed: the
   Messages API with structured output (`claude-opus-5-5`, override with
   `GEOLOCK_CLAUDE_MODEL`). Codex accepts an API key via `codex login --with-api-key`.
@@ -114,11 +114,31 @@ Never on by default: the app's boxes start unticked on every page load, `locate`
 commands, so they never spend the user's plan.
 
 What is sent: the pixels only, re-encoded as JPEG (≤1568 px), so EXIF GPS and camera
-serials never leave the machine, plus (unless "Share GeoLock's findings" is off) a short
-text briefing: GeoLock's top 3 guesses, country odds, OCR text, clue titles, CLIP scene
-labels and the camera's clock time. The prompt tells the model GeoLock's visual guesses
-are weak hints. The model returns reasoning, observations, driving side, text read and
-1-5 guesses with lat/lon, radius and probability.
+serials never leave the machine; up to 4 **zoomed crops of the signs** (see below); and
+(unless "Share GeoLock's findings" is off) a short text briefing: GeoLock's top 3
+guesses, country odds, OCR text, clue titles, CLIP scene labels and the camera's clock
+time. The prompt tells the model GeoLock's visual guesses are weak hints.
+
+**The prompt (2026-10-15)** works like a strong GeoGuessr player: a fixed 12-item
+checklist in order (driving side, road lines, signs, bollards, licence plates, utility
+poles, script and language, architecture, vegetation, terrain and soil, sun and climate,
+other), each item answered only if visible, with what it suggests *and rules out*. Then
+3-6 sentences of reasoning, up to 4 rejected places with the evidence against them, and
+1-5 ranked guesses with lat/lon, radius, probability and a one-line "why" each. The
+schema enforces the checklist categories; `clean()` still reads the older flat `clues`
+answers saved in the library. Checklist items are shown (with category labels) and carry
+no extra weight; the guesses are fused as before.
+
+**Sign crops** (`analyst.sign_crops`): GeoLock's OCR boxes are grouped into signs (lines
+within about 1.5 text heights merge), padded so the sign's shape and colour show, cut
+from the full-resolution photo (the whole photo is downscaled to 1568 px, a sign often
+isn't legible there) and sent as images 2-5, ranked by how much confident text they hold.
+Crops smaller than 384 px are enlarged, larger ones capped at 768 px; boxes covering
+more than a quarter of the photo are skipped (no zoom gain). The prompt lists each crop's
+region and, only when findings are shared, what GeoLock's OCR read there, and tells the
+model to trust its own reading when they differ. `GEOLOCK_LLM_CROPS=0` turns crops off.
+Limit: OCR only keeps confident lines, so text it could not read at all gets no crop yet.
+The app shows the crops as small thumbnails on the answer card.
 
 Fusion is a **mixture, not a product**: final = (1 − w) × local posterior + w × the
 analysts' distribution, where each analyst guess puts its stated probability in a bump of
@@ -386,6 +406,12 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-15**: Smarter second opinion: the Claude / ChatGPT prompt walks a 12-item
+  geoguessing checklist, names places it rules out and gives a reason per guess; zoomed
+  crops of the signs GeoLock's OCR found are sent along with the photo. The app shows
+  the checklist, reasons, rejected places and crop thumbnails. Tested with fake CLIs only
+  (no real Claude / ChatGPT calls); the accuracy gain is not yet measured.
 
 - **2026-10-15**: Windows desktop app (PR #11): Tauri window and installer, new UI with
   a photo library, first-run model download without PyTorch, settings. Re-running a photo

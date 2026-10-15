@@ -54,9 +54,16 @@ def cmd_locate(a):
                 print(f"  {an['name']}: failed: {an['error']}")
                 continue
             print(f"  {an['name']} ({an['via']}, {an['ms'] / 1000:.0f} s): {an['reasoning']}")
+            if an.get("crops"):
+                print(f"    (also sent {len(an['crops'])} zoomed crop(s) of signs)")
+            for c in an.get("checklist", []):
+                print(f"    - {c['label']}: {c['seen']}" + (f" -> {c['suggests']}" if c["suggests"] else ""))
             for g in an["guesses"]:
                 print(f"    {g['confidence']:6.1%}  {g['lat']:.4f}, {g['lon']:.4f}  ±{g['radius_km']:.0f} km  "
-                      f"{', '.join(x for x in (g['place'], g['country']) if x)}")
+                      f"{', '.join(x for x in (g['place'], g['country']) if x)}"
+                      + (f"  ({g['why']})" if g.get("why") else ""))
+            for r in an.get("ruled_out", []):
+                print(f"    not {r['place']}: {r['why']}")
         for c in r["clues"]:
             if c["strength"] > 0:
                 print(f"  clue: {c['title']} — {c['detail']}")

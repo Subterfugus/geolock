@@ -12,7 +12,7 @@ import {
   ANALYST_COMPANY, ANALYST_NAME, confidenceName, coordText, deviceLabel, formatSeconds, fullDate, guessTitle, km, pct, plainCoords, radiusText,
 } from '../lib/format';
 import { patch, useStore } from '../lib/store';
-import type { Analyst, Clue, Guess, Provider, Result } from '../lib/types';
+import type { Analyst, AnalystCrop, Clue, Guess, Provider, Result } from '../lib/types';
 import { Button, ConfidencePill, ConfidenceRing, cx, Flag, IconButton, Meter, SectionTitle, Spinner, confBg, confText } from './ui';
 
 const PROVIDER_VAR: Record<Provider, string> = { claude: 'var(--claude)', chatgpt: 'var(--chatgpt)' };
@@ -430,18 +430,22 @@ function SecondOpinion({ result }: { result: Result }) {
       </p>
       {result.analysts.length > 0 && (
         <div className="mt-4 flex flex-col gap-3">
-          {result.analysts.map((a) => <AnalystCard key={a.provider} analyst={a} resultId={result.id} />)}
+          {result.analysts.map((a) => <AnalystCard key={a.provider} analyst={a} result={result} />)}
         </div>
       )}
     </section>
   );
 }
 
-function AnalystCard({ analyst: a, resultId }: { analyst: Analyst; resultId: string }) {
+function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result }) {
+  const resultId = result.id;
   const asking = useStore((s) => s.asking[resultId]);
   const color = PROVIDER_VAR[a.provider];
   const name = ANALYST_NAME[a.provider];
   const meta = [a.model, a.ms != null ? formatSeconds(a.ms) : null].filter(Boolean).join(' · ');
+  const checklist = a.checklist ?? [];
+  const ruledOut = a.ruled_out ?? [];
+  const crops = a.crops ?? [];
   if (!a.ok) {
     return (
       <article className="rounded-xl border border-border bg-surface-2 p-3.5" style={{ borderLeft: `3px solid ${color}` }}>
@@ -474,10 +478,18 @@ function AnalystCard({ analyst: a, resultId }: { analyst: Analyst; resultId: str
         <span className="shrink-0 text-right text-[11px] text-fg-3 tnum">{meta}</span>
       </header>
       {a.reasoning && <p className="mt-2.5 text-[13px] leading-relaxed text-fg">{a.reasoning}</p>}
-      {(a.driving_side || a.text_seen) && (
+      {((a.driving_side && a.driving_side !== 'unknown') || a.text_seen) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {a.driving_side && <span className="rounded-md bg-surface px-2 py-0.5 text-[11.5px] text-fg-2">Drives on the <b className="font-semibold text-fg">{a.driving_side}</b></span>}
-          {a.text_seen && <span className="max-w-full truncate rounded-md bg-surface px-2 py-0.5 text-[11.5px] text-fg-2">Text: “{a.text_seen}”</span>}
+          {a.driving_side && a.driving_side !== 'unknown' && <span className="rounded-md bg-surface px-2 py-0.5 text-[11.5px] text-fg-2">Drives on the <b className="font-semibold text-fg">{a.driving_side}</b></span>}
+          {a.text_seen && <span className="max-w-full truncate rounded-md bg-surface px-2 py-0.5 text-[11.5px] text-fg-2" title={a.text_seen}>Text: “{a.text_seen}”</span>}
+        </div>
+      )}
+      {crops.length > 0 && (
+        <div className="mt-2.5">
+          <div className="text-[11.5px] text-fg-3">Also looked closely at {crops.length === 1 ? 'one sign' : `${crops.length} signs`}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {crops.map((c, i) => <CropThumb key={i} crop={c} result={result} />)}
+          </div>
         </div>
       )}
       {a.guesses.length > 0 && (
@@ -487,22 +499,52 @@ function AnalystCard({ analyst: a, resultId }: { analyst: Analyst; resultId: str
               <button
                 type="button"
                 onClick={() => mapHandle.current?.flyTo(g.lat, g.lon, g.radius_km)}
-                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] hover:bg-surface"
+                className="flex w-full flex-col rounded-lg px-2 py-1.5 text-left text-[12.5px] hover:bg-surface"
                 title="Show on map"
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 text-[11px] font-semibold text-fg-3 tnum">{gi + 1}.</span>
-                  <span className="truncate">{[g.place, g.country].filter(Boolean).join(', ') || 'Unknown'}</span>
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-[11px] font-semibold text-fg-3 tnum">{gi + 1}.</span>
+                    <span className="truncate">{[g.place, g.country].filter(Boolean).join(', ') || 'Unknown'}</span>
+                  </span>
+                  <span className="shrink-0 text-[11.5px] text-fg-3 tnum">
+                    {pct(g.confidence)} · ±{Math.round(g.radius_km)} km
+                  </span>
                 </span>
-                <span className="shrink-0 text-[11.5px] text-fg-3 tnum">
-                  {pct(g.confidence)} · ±{Math.round(g.radius_km)} km
-                </span>
+                {g.why && <span className="mt-0.5 pl-[18px] text-[11.5px] leading-snug text-fg-2">{g.why}</span>}
               </button>
             </li>
           ))}
         </ol>
       )}
-      {a.clues.length > 0 && (
+      {checklist.length > 0 && (
+        <Disclosure label={`${name}'s checklist (${checklist.length})`} defaultOpen>
+          <dl className="flex flex-col gap-2 text-[12.5px]">
+            {checklist.map((c, i) => (
+              <div key={i} className="leading-snug">
+                <dt className="text-[10.5px] font-semibold uppercase tracking-wide text-fg-3">{c.label}</dt>
+                <dd>
+                  <span>{c.seen}</span>
+                  {c.suggests && <span className="text-fg-2"> → {c.suggests}</span>}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Disclosure>
+      )}
+      {ruledOut.length > 0 && (
+        <Disclosure label={`Ruled out (${ruledOut.length})`}>
+          <ul className="flex flex-col gap-1.5 text-[12.5px]">
+            {ruledOut.map((r, i) => (
+              <li key={i} className="leading-snug">
+                <span className="font-medium">{r.place}</span>
+                {r.why && <span className="text-fg-2">: {r.why}</span>}
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+      {checklist.length === 0 && a.clues.length > 0 && (
         <Disclosure label={`What ${name} saw (${a.clues.length})`}>
           <ul className="flex flex-col gap-1.5 text-[12.5px]">
             {a.clues.map((c, i) => (
@@ -516,6 +558,33 @@ function AnalystCard({ analyst: a, resultId }: { analyst: Analyst; resultId: str
       )}
       <p className="mt-3 text-[11px] text-fg-3">{ANALYST_COMPANY[a.provider]} · answer is an opinion, not a measurement</p>
     </article>
+  );
+}
+
+/** A sign the analyst was sent as a zoomed crop, cut from the photo with CSS. */
+function CropThumb({ crop, result }: { crop: AnalystCrop; result: Result }) {
+  const [x0, y0, x1, y1] = crop.box;
+  const W = result.image.width || 1;
+  const H = result.image.height || 1;
+  const w = Math.max(1, x1 - x0);
+  const h = Math.max(1, y1 - y0);
+  const scale = Math.min(56 / h, 132 / w); // fit the crop in at most 132 x 56 px
+  return (
+    <div
+      className="relative shrink-0 overflow-hidden rounded-md border border-border bg-surface"
+      style={{ width: Math.round(w * scale), height: Math.round(h * scale) }}
+      title={crop.text ? `GeoLock read “${crop.text}” here` : 'Zoomed crop sent with the photo'}
+    >
+      {result.image_url && (
+        <img
+          src={assetUrl(result.image_url)}
+          alt={crop.text ? `Close-up: ${crop.text}` : 'Close-up of a sign'}
+          decoding="async"
+          className="absolute max-w-none"
+          style={{ width: W * scale, height: H * scale, left: -x0 * scale, top: -y0 * scale }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -602,8 +671,8 @@ function FragmentRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Disclosure({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+function Disclosure({ label, children, defaultOpen = false }: { label: string; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="mt-3">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex items-center gap-1 text-[12px] font-medium text-fg-2 hover:text-fg">
