@@ -7,6 +7,7 @@ import { askAnalyst, reanalyse, selectGuess, removeResult } from '../lib/control
 import { assetUrl } from '../lib/backend';
 import { copyText, openExternal } from '../lib/shell';
 import { mapHandle } from '../lib/map/mapController';
+import { Ocr } from './OcrBoxes';
 import {
   ANALYST_COMPANY, ANALYST_NAME, confidenceName, coordText, deviceLabel, formatSeconds, fullDate, guessTitle, km, pct, plainCoords, radiusText,
 } from '../lib/format';
@@ -119,20 +120,7 @@ function PhotoPanel({ result }: { result: Result }) {
   return (
     <div className="group relative w-full overflow-hidden rounded-2xl bg-surface-3" style={{ aspectRatio: `${w} / ${h}`, maxHeight: 250 }}>
       <img src={assetUrl(result.image_url)} alt={`Photo: ${result.name}`} className="h-full w-full object-contain" decoding="async" />
-      {show && hasOcr && (
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-          {result.ocr.map((l, i) => (
-            <polygon
-              key={i}
-              points={l.box.map((p) => p.join(',')).join(' ')}
-              fill="rgb(255 212 0 / 0.14)"
-              stroke="#ffd400"
-              strokeWidth={1.6}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-        </svg>
-      )}
+      {show && hasOcr && <Ocr result={result} />}
       <div className="absolute bottom-2 left-2 flex gap-1.5">
         <button
           type="button"
