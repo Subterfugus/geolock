@@ -214,6 +214,19 @@ Start menu, and it runs in its own window. The browser version (`run.bat`) still
   freezes the backend, runs `tools/desktop_smoke.py` (real download, convert, locate a
   photo with text, clean exit), then builds the NSIS installer. Pushes to main publish it
   as a GitHub release.
+- **Processor** (`geolock/devices.py`): Auto tries the Arc GPU, then the NPU, then the
+  CPU; a fixed choice in Settings tries that device, then the CPU. A device that fails to
+  compile, fails while running, or returns NaN/infinity is dropped and the photo carries
+  on on the next one; Settings then says which device failed and why. GPU kernels and NPU
+  blobs are cached in `models/ov_cache`, so only the first start on a device is slow.
+  Settings → Processor shows where CLIP runs, start-up and per-photo times and the last
+  photo's timings, a "Test speed on each processor" button (compiles and times CLIP on
+  GPU, NPU and CPU side by side, with a "Use" button per row) and "Copy details" to paste
+  the whole readout into a message. CLI: `geolock bench --all-devices`.
+  Precision: the model is stored with FP16 weights; the GPU and NPU run FP16, the CPU runs
+  FP32 (Lunar Lake has no AVX-512/AMX for BF16). INT8 weight compression (NNCF, no new
+  download, but adds NNCF to the app bundle and needs an accuracy check) is the next lever
+  if the CPU path matters.
 - **Gotcha**: OpenBLAS's thread pool hung after OpenVINO had run in the same process
   (at DLL load on Windows, in a matmul on Linux), so the backend runs BLAS single-threaded.
 
@@ -409,7 +422,8 @@ about real-photo accuracy yet.
 0. Measure the second opinion (`--ask claude`) only if Brady asks: it uses his plan.
    Evals stay local-only by default.
 1. ~~Run setup, bench, testset and eval~~: done on the Windows desktop (see "Results on
-   the Commons set"). Still to do on the laptop: `geolock bench` for Arc GPU / NPU speed.
+   the Commons set"). Still to do on the laptop: Settings → Processor → "Test speed on
+   each processor" (or `geolock bench --all-devices`) for Arc GPU / NPU speed.
 2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
    recognisable.
 3. ~~Multilingual OCR~~ (done, see the changelog).
@@ -420,6 +434,12 @@ about real-photo accuracy yet.
 7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Laptop speed mode: automatic fallback to the CPU when the GPU or NPU
+  fails to compile or run (also mid-session), a diagnostics readout and per-processor
+  speed test in Settings, NPU kernel cache. Tested with a fake OpenVINO core
+  (`tests/test_devices.py`) and on the Windows CI runner (CPU only; choosing the missing
+  NPU falls back to the CPU). **Not yet run on a real Arc GPU or NPU.**
 
 - **2026-10-15**: Desktop app features: folder / batch mode with progress and Stop, folder
   drops, nicer names for pasted images, export (map PNG, KML, CSV, JSON) per photo or for

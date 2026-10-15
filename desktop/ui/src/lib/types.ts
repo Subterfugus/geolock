@@ -19,9 +19,51 @@ export interface Status {
   device: DeviceName | null;
   device_name?: string | null;
   available_devices: DeviceName[];
+  diagnostics?: Diagnostics | null;
   analysts: Partial<Record<Provider, AnalystStatus>>;
   data_dir: string;
   models_dir: string;
+}
+
+export interface DeviceAttempt {
+  device: DeviceName;
+  step: 'compile' | 'run' | 'first run';
+  ok: boolean;
+  ms: number | null;
+  error: string | null;
+}
+
+/** Where CLIP runs and how it got there (null until the models are loaded). */
+export interface Diagnostics {
+  requested: 'AUTO' | DeviceName;
+  device: DeviceName;
+  device_name: string | null;
+  compile_ms: number | null;
+  first_run_ms: number | null;
+  last_run_ms: number | null;
+  runs: number;
+  warmup_ms: number | null;
+  load_ms: number | null;
+  /** The latest photo analysed since the models loaded. */
+  last_locate: { device: DeviceName | null; timings: Result['timings']; at: number } | null;
+  /** One sentence when a device failed and GeoLock fell back, else null. */
+  fallback: string | null;
+  attempts: DeviceAttempt[];
+}
+
+export interface BenchmarkRow {
+  device: DeviceName;
+  name: string | null;
+  ok: boolean;
+  compile_ms: number | null;
+  first_run_ms: number | null;
+  ms: number | null;
+  error: string | null;
+}
+
+export interface Benchmark {
+  rows: BenchmarkRow[];
+  at: number | null;
 }
 
 export type StepState = 'pending' | 'running' | 'done' | 'error';

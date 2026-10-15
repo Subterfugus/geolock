@@ -274,4 +274,4 @@ def test_import_existing_models_folder(backend, tmp_path):
     assert r.status_code == 200, r.text
     wait(lambda: b.state == "ready")
     assert client.hits == []  # nothing downloaded
-    assert b.engine.vision.inputs[0].get_element_type().get_type_name() == "f32"
+    assert b.engine.runner.compiled.inputs[0].get_element_type().get_type_name() == "f32"

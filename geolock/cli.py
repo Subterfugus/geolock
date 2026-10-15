@@ -184,6 +184,13 @@ def cmd_bench(a):
     import numpy as np
     from PIL import Image
     eng = _engine(a)
+    if eng.runner.fallback:
+        print(eng.runner.fallback)
+    if a.all_devices:
+        for r in eng.benchmark(a.n):
+            res = f"{r['ms']} ms per photo (compile {r['compile_ms']} ms)" if r["ok"] else r["error"]
+            print(f"{r['device']:4} {res}  {r['name'] or ''}")
+        return
     img = Image.fromarray((np.random.default_rng(0).random((768, 1024, 3)) * 255).astype("uint8"))
     eng.locate(img, use_ocr=False)
     t = time.perf_counter()
@@ -249,6 +256,7 @@ def main(argv=None):
     sub.add_parser("analysts", help="check whether Claude / ChatGPT can be asked from here")
     s = sub.add_parser("bench", help="time the models on this machine")
     s.add_argument("-n", type=int, default=10)
+    s.add_argument("--all-devices", action="store_true", help="time CLIP on the GPU, NPU and CPU side by side")
     a = ap.parse_args(argv)
     if a.cmd in (None, "serve"):
         if a.cmd is None:

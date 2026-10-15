@@ -1,6 +1,6 @@
 import { apiRequest } from './backend';
 import type {
-  HistorySummary, Provider, Result, Settings, SetupInfo, Status, AnalystStatus,
+  Benchmark, HistorySummary, Provider, Result, Settings, SetupInfo, Status, AnalystStatus,
 } from './types';
 
 export const getStatus = () => apiRequest<Status>('GET', '/api/status');
@@ -15,6 +15,9 @@ export const putSettings = (patch: Partial<Settings>) =>
   apiRequest<Settings>('PUT', '/api/settings', { json: patch });
 export const refreshAnalysts = () =>
   apiRequest<Record<Provider, AnalystStatus>>('POST', '/api/analysts/refresh');
+
+export const getBenchmark = () => apiRequest<Benchmark>('GET', '/api/diagnostics/benchmark');
+export const runBenchmark = () => apiRequest<Benchmark>('POST', '/api/diagnostics/benchmark');
 
 export const getHistory = () => apiRequest<HistorySummary[]>('GET', '/api/history');
 export const getResult = (id: string) => apiRequest<Result>('GET', `/api/history/${encodeURIComponent(id)}`);

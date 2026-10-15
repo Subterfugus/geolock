@@ -29,6 +29,7 @@ from . import prompts
 from .clues import Clue
 from .config import CROPS, DEVICE, MODELS_DIR
 from .countrymeta import SCRIPT_COUNTRIES
+from .devices import VisionRunner, benchmark, is_intel_gpu
 from .exif import exif_clues, read_exif
 from .geodata import GeoData, haversine_km, weighted_center
 from .locenc import LocationEncoder, normalize
@@ -89,6 +90,7 @@ class Geolocator:
         # confidences are honoured within that share).
         self.analyst_weight = float(self.calibration.get("analyst_weight", 0.75))
         self.cluster_km = cluster_km
+        self.warmup_ms = None
         self.geo = GeoData()
         self.reader = TextReader()
         self._load()
@@ -103,7 +105,7 @@ class Geolocator:
         self.core = ov.Core()
         self.manifest = json.loads((md / "manifest.json").read_text()) if (md / "manifest.json").exists() else {}
         model = self.core.read_model(md / "clip_vision.xml")
-        self.device, self.vision = self._compile(model)
+        self.runner = VisionRunner(self.core, model, self.requested_device, md / "ov_cache")
 
         g = np.load(md / "geoclip.npz")
         self.mlp = [g["mlp.w1"].T, g["mlp.b1"], g["mlp.w2"].T, g["mlp.b2"]]
@@ -125,42 +127,26 @@ class Geolocator:
         self.attr_text = {k: np.stack([emb[f"attr/{k}/{j}"] for j in range(len(a["options"]))])
                           for k, a in prompts.ATTRIBUTES.items()}
 
-    def _intel_gpu(self):
-        """OpenVINO also lists NVIDIA/AMD cards as GPU through OpenCL, but its GPU plugin
-        only has kernels for Intel graphics; AUTO uses the GPU only when it is Intel's."""
-        for d in self.core.available_devices:
-            if d.startswith("GPU"):
-                try:
-                    if "intel" in str(self.core.get_property(d, "FULL_DEVICE_NAME")).lower():
-                        return True
-                except Exception:
-                    pass
-        return False
+    @property
+    def device(self):
+        """Where CLIP runs now (GPU / NPU / CPU); can change if a device fails mid-run."""
+        return self.runner.device
 
-    def _compile(self, model):
-        avail = self.core.available_devices
-        auto = self.requested_device.upper() == "AUTO"
-        order = (["GPU", "NPU", "CPU"] if auto else [self.requested_device.upper(), "CPU"])
-        errors = []
-        for dev in order:
-            if not any(a.startswith(dev) for a in avail):
-                continue
-            if auto and dev == "GPU" and not self._intel_gpu():
-                continue
-            try:
-                cfg = {"PERFORMANCE_HINT": "LATENCY"}
-                if dev == "GPU":
-                    cfg["CACHE_DIR"] = str(self.models_dir / "ov_cache")
-                return dev, self.core.compile_model(model, dev, cfg)
-            except Exception as e:  # e.g. NPU driver missing -> fall through
-                errors.append(f"{dev}: {e}")
-        raise RuntimeError("Could not compile CLIP on any device:\n" + "\n".join(errors))
+    def _intel_gpu(self):
+        return is_intel_gpu(self.core)
+
+    def benchmark(self, n=3):
+        """Time CLIP on every device this computer has (see geolock.devices.benchmark)."""
+        im = Image.fromarray((np.random.default_rng(0).random((768, 1024, 3)) * 255).astype("uint8"))
+        return benchmark(self.core, self.runner.model, make_crops(im), n, self.models_dir / "ov_cache")
 
     def warmup(self):
         """Load lazy geodata and run the models once so the first real photo is fast."""
+        t0 = time.perf_counter()
         self.geo.admin1, self.geo.nearest_place(0.0, 0.0)
         self.reader.ocr, self.reader.lang_detector
         self.locate(Image.new("RGB", (320, 240), (128, 128, 128)), use_ocr=True)
+        self.warmup_ms = round((time.perf_counter() - t0) * 1000)
 
     @cached_property
     def vlm(self):
@@ -174,8 +160,7 @@ class Geolocator:
 
     # --------------------------------------------------------------- helpers
     def embed(self, im):
-        out = self.vision(make_crops(im))[0]
-        return np.asarray(out, dtype=np.float32)  # (CROPS, 768)
+        return self.runner(make_crops(im))  # (CROPS, 768), falls back to the CPU on failure
 
     def geoclip_query(self, img_emb):
         w1, b1, w2, b2 = self.mlp
