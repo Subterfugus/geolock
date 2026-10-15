@@ -3,22 +3,20 @@ name: Desktop app
 # Builds the GeoLock Windows installer:
 #   assets   (Linux)   small model assets + the pinned CLIP download, checked against PyTorch
 #   windows  (Windows) frozen Python backend, smoke test with the real model, Tauri + NSIS installer
-# Pushes to main also publish the installer as a GitHub release (v<version>), once per
-# version: an existing release is never overwritten.
+# Runs only on pushes to main (and by hand), where it gates the release: it publishes the
+# installer as a GitHub release (v<version>), once per version; an existing release is
+# never overwritten. Pull requests get the quick checks in tests.yml instead.
 
 on:
   push:
     branches: [main]
     paths-ignore: ["info.md", "README.md", "docs/**"]
-  pull_request:
-    paths-ignore: ["info.md", "README.md", "docs/**"]
   workflow_dispatch:
 
-# A newer push to a PR cancels its older build; builds of main always finish, because
-# each one publishes the release.
+# Builds of main always finish, because each one publishes the release.
 concurrency:
   group: desktop-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
