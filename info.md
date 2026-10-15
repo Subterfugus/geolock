@@ -536,6 +536,10 @@ about real-photo accuracy yet.
 
 ## Changelog
 
+- **2026-10-15**: Version 0.5.1: only the Settings version label fix (PR #26, Settings showed
+  "GeoLock 0.4.4 · engine 0.5.0"). Same engine as 0.5.0. The first release delivered through
+  the in-app Update button.
+
 - **2026-10-15**: Version 0.5.0, the accuracy batch (Brady's picks from the idea lists).
   Licence plates and postcodes (`geolock/addresses.py`; GeoNames postcode list built by
   `tools/build_postcodes.py`, bundled as postcodes.npz, 887k postcodes, 9.6 MB). Zoomed
