@@ -78,7 +78,11 @@ jobs:
       - name: Unit tests (device choice and CPU fallback)
         run: pip install pytest && python -m pytest -q tests/test_devices.py
       - name: Bundle the OCR models
-        run: python -c "from geolock.setup_models import prefetch_ocr; prefetch_ocr()"
+        run: |
+          # Some runner CPUs have crashed here with "Illegal instruction": name the CPU and
+          # the module that crashed, since users' CPUs could hit the same thing.
+          powershell -NoProfile -Command "Get-CimInstance Win32_Processor | Format-List Name, Manufacturer, NumberOfCores"
+          python -X faulthandler -c "from geolock.setup_models import prefetch_ocr; prefetch_ocr()"
       - name: Freeze the backend
         run: pyinstaller --noconfirm --distpath desktop/backend-dist --workpath build/pyinstaller desktop/backend/geolock-backend.spec
       - name: Smoke test (real first-run download, then locate a photo)
