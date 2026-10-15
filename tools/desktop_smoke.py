@@ -58,8 +58,14 @@ def run_setup(port):
     call(port, "/api/setup/start", "POST", b"")
     t0, last = time.time(), ""
     while True:
-        st = call(port, "/api/status", timeout=10)
-        rep = call(port, "/api/setup", timeout=10)
+        try:
+            st = call(port, "/api/status", timeout=30)
+            rep = call(port, "/api/setup", timeout=30)
+        except (TimeoutError, OSError) as e:  # the backend can be busy for a while converting
+            print(f"  {time.time() - t0:5.0f}s status not answered yet ({e})", flush=True)
+            if time.time() - t0 > 1500:
+                raise SystemExit("setup timed out")
+            continue
         msg = (rep.get("progress") or {}).get("message") or st["state"]
         if msg != last and (time.time() % 10 < 1 or "Download" not in msg):
             print(f"  {time.time() - t0:5.0f}s {msg}", flush=True)
