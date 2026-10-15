@@ -353,26 +353,30 @@ class Geolocator:
         return final / final.sum(), w * spots
 
     def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
-               keep_evidence=False, ask=(), share_local=True):
-        """ask: analysts to consult ("claude", "chatgpt"); see geolock/analyst.py."""
+               keep_evidence=False, ask=(), share_local=True, prior_analysts=()):
+        """ask: analysts to consult ("claude", "chatgpt"); see geolock/analyst.py.
+        prior_analysts: answers from an earlier run, reused as they are (the desktop app
+        keeps them when a photo is re-analysed, so the user's plan isn't asked twice)."""
         t0 = time.perf_counter()
         timings = {}
         im, meta = self.open_image(image)
         codes = self.geo.country_codes
         n_c = len(codes)
         ev = self.evidence(im, meta, use_ocr, use_vlm, timings)
-        analysts = []
-        if ask:
+        analysts = [a for a in prior_analysts if a.get("provider") not in ask]
+        if ask or analysts:
             from .analyst import analyst_clues, ask_all
             t = time.perf_counter()
-            analysts = ask_all(ask, im, self.briefing(ev, meta) if share_local else None)
+            if ask:
+                analysts += ask_all(ask, im, self.briefing(ev, meta) if share_local else None)
             for a in analysts:
                 ev["clues"] += analyst_clues(a, codes, self.geo.country_name)
                 for g in a.get("guesses", []):
                     if use_exif_gps and meta.get("gps"):
                         g["km_from_exif"] = round(float(haversine_km(
                             g["lat"], g["lon"], meta["gps"]["lat"], meta["gps"]["lon"])), 1)
-            timings["llm_ms"] = round((time.perf_counter() - t) * 1000)
+            if ask:
+                timings["llm_ms"] = round((time.perf_counter() - t) * 1000)
         q, p_country_clip, clues = ev["q"], ev["p_country_clip"], ev["clues"]
         scene, ocr_lines, vlm_raw = ev["scene"], ev["ocr"], ev["vlm_raw"]
         log_post, log_geo, country_ll = self.posterior(q, p_country_clip, clues)

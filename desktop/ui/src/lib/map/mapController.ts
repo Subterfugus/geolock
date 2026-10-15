@@ -1,0 +1,391 @@
+import { LngLatBounds, Map as MapLibreMap, Marker } from 'maplibre-gl';
+import type { FeatureCollection, Feature, Point, Polygon } from 'geojson';
+import type { StyleSpecification } from 'maplibre-gl';
+import { dataUrl } from '../backend';
+import { guessTitle } from '../format';
+import { geodesicCircle } from '../geo';
+import type { Guess, MapStyleKind, Result } from '../types';
+import { FONT_STACK, PALETTE, offlineStyle, onlineStyle, type Theme } from './mapStyles';
+
+type Fc = FeatureCollection<Point | Polygon>;
+
+const CONF_COLOR: Record<Theme, Record<Guess['label'], string>> = {
+  dark: { high: '#34d399', medium: '#fbbf24', low: '#8ea3c7' },
+  light: { high: '#059669', medium: '#d97706', low: '#5b6f94' },
+};
+
+// Shared between map instances so the 3.6 MB admin-1 file is fetched once per run.
+let countriesFc: FeatureCollection | null = null;
+let labelFc: Fc | null = null;
+let countriesPromise: Promise<void> | null = null;
+let admin1Fc: FeatureCollection | null = null;
+let admin1Promise: Promise<void> | null = null;
+
+function loadCountries(): Promise<void> {
+  if (!countriesPromise) {
+    countriesPromise = fetch(dataUrl('/data/countries.geojson'))
+      .then((r) => r.json())
+      .then((gj: FeatureCollection) => {
+        countriesFc = gj;
+        const features: Feature<Point>[] = [];
+        for (const f of gj.features) {
+          const p = f.properties ?? {};
+          if (p.lx == null || p.ly == null) continue;
+          features.push({
+            type: 'Feature',
+            properties: { name: p.name, minlabel: p.minlabel ?? 3 },
+            geometry: { type: 'Point', coordinates: [p.lx, p.ly] },
+          });
+        }
+        labelFc = { type: 'FeatureCollection', features };
+      })
+      .catch(() => {
+        countriesPromise = null;
+      });
+  }
+  return countriesPromise;
+}
+
+function loadAdmin1(): Promise<void> {
+  if (!admin1Promise) {
+    admin1Promise = fetch(dataUrl('/data/admin1.geojson'))
+      .then((r) => r.json())
+      .then((gj: FeatureCollection) => {
+        admin1Fc = gj;
+      })
+      .catch(() => {
+        admin1Promise = null;
+      });
+  }
+  return admin1Promise;
+}
+
+const EMPTY: Fc = { type: 'FeatureCollection', features: [] };
+
+export interface GeoMapCallbacks {
+  onGuessClick(index: number): void;
+  onStyleFailed(kind: MapStyleKind): void;
+}
+
+/** A MapLibre map with the GeoLock basemap, result overlays and DOM pins. */
+export class GeoMap {
+  private map: MapLibreMap;
+  private kind: MapStyleKind;
+  private theme: Theme;
+  private styleReady = false;
+  private result: Result | null = null;
+  private selected = 0;
+  private pins: Marker[] = [];
+  private heatFc: Fc = EMPTY;
+  private uncFc: Fc = EMPTY;
+  private labelKey = -1;
+  private destroyed = false;
+
+  constructor(container: HTMLElement, kind: MapStyleKind, theme: Theme, private cb: GeoMapCallbacks, opts: { zoom?: number } = {}) {
+    this.kind = kind;
+    this.theme = theme;
+    this.map = new MapLibreMap({
+      container,
+      style: this.styleFor(kind, theme),
+      center: [12, 24],
+      zoom: opts.zoom ?? 1.7,
+      minZoom: 1,
+      maxZoom: 12,
+      renderWorldCopies: false,
+      attributionControl: false,
+      dragRotate: false,
+      pitchWithRotate: false,
+      touchPitch: false,
+      fadeDuration: 150,
+    });
+    this.map.on('style.load', () => this.onStyleLoad());
+    this.map.on('zoom', () => this.onZoom());
+    // A static map (setup screen, empty library) does not redraw by itself when data arrives; nudge it.
+    this.map.on('sourcedata', (e) => { if (e.isSourceLoaded) this.map.triggerRepaint(); });
+    this.map.on('error', () => {
+      // A remote style that never loaded falls back to the offline map.
+      if (!this.styleReady && this.kind !== 'offline' && !this.destroyed) this.cb.onStyleFailed(this.kind);
+    });
+    void loadCountries().then(() => this.styleReady && this.ensureBasemap());
+  }
+
+  private styleFor(kind: MapStyleKind, theme: Theme): StyleSpecification | string {
+    return kind === 'offline' ? offlineStyle(theme) : onlineStyle(kind, theme);
+  }
+
+  // ------------------------------------------------------------ style
+
+  setStyleKind(kind: MapStyleKind, theme: Theme): void {
+    if (kind === this.kind && theme === this.theme) return;
+    this.kind = kind;
+    this.theme = theme;
+    this.styleReady = false;
+    this.buildOverlayData();
+    this.map.setStyle(this.styleFor(kind, theme), { diff: false });
+  }
+
+  private onStyleLoad(): void {
+    this.styleReady = true;
+    this.ensureBasemap();
+    this.ensureOverlays();
+    this.labelKey = -1;
+    this.onZoom();
+  }
+
+  private ensureBasemap(): void {
+    if (this.kind !== 'offline' || !this.styleReady || !countriesFc || !labelFc) return;
+    const map = this.map;
+    const p = PALETTE[this.theme];
+    const before = map.getLayer('heat-layer') ? 'heat-layer' : undefined;
+    map.setPaintProperty('background', 'background-color', p.ocean);
+    if (!map.getSource('countries')) {
+      map.addSource('countries', { type: 'geojson', data: countriesFc as FeatureCollection, maxzoom: 6, tolerance: 0.4 });
+      map.addLayer({ id: 'land', type: 'fill', source: 'countries', paint: { 'fill-color': p.land, 'fill-opacity': 1 } }, before);
+      map.addLayer({
+        id: 'country-borders', type: 'line', source: 'countries',
+        paint: { 'line-color': p.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.4, 5, 1.1] },
+      }, before);
+      map.addSource('admin1', { type: 'geojson', data: admin1Fc ?? EMPTY, maxzoom: 6, tolerance: 0.4 });
+      map.addLayer({
+        id: 'admin1-lines', type: 'line', source: 'admin1', minzoom: 4,
+        paint: { 'line-color': p.admin, 'line-width': 0.8, 'line-dasharray': [2, 2.2] },
+      }, before);
+      map.addSource('country-labels', { type: 'geojson', data: labelFc as FeatureCollection });
+      map.addLayer({
+        id: 'country-labels', type: 'symbol', source: 'country-labels',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': [FONT_STACK],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 1, 9, 4, 12, 7, 15],
+          'text-max-width': 7,
+          'text-letter-spacing': 0.02,
+        },
+        paint: { 'text-color': p.label, 'text-halo-color': p.halo, 'text-halo-width': 1.4 },
+      }, before);
+      this.labelKey = -1;
+      this.onZoom();
+    } else {
+      map.setPaintProperty('land', 'fill-color', p.land);
+      map.setPaintProperty('country-borders', 'line-color', p.border);
+      map.setPaintProperty('admin1-lines', 'line-color', p.admin);
+      map.setPaintProperty('country-labels', 'text-color', p.label);
+      map.setPaintProperty('country-labels', 'text-halo-color', p.halo);
+    }
+    if (!admin1Fc && this.map.getZoom() >= 3.5) void this.loadAdmin1Now();
+  }
+
+  private async loadAdmin1Now(): Promise<void> {
+    await loadAdmin1();
+    if (!this.styleReady || this.kind !== 'offline' || !admin1Fc) return;
+    const src = this.map.getSource('admin1') as { setData?: (d: FeatureCollection) => void } | undefined;
+    src?.setData?.(admin1Fc);
+  }
+
+  private onZoom(): void {
+    if (!this.styleReady) return;
+    const z = this.map.getZoom();
+    if (this.kind === 'offline' && z >= 3.5 && !admin1Fc) void this.loadAdmin1Now();
+    if (this.kind !== 'offline' || !this.map.getLayer('country-labels')) return;
+    // Show each country name from its own minimum zoom; quantised so setFilter isn't called every frame.
+    const threshold = z + 0.6;
+    const key = Math.floor(threshold * 4);
+    if (key === this.labelKey) return;
+    this.labelKey = key;
+    this.map.setFilter('country-labels', ['<=', ['get', 'minlabel'], threshold]);
+  }
+
+  // --------------------------------------------------------- overlays
+
+  private ensureOverlays(): void {
+    const map = this.map;
+    if (!map.getSource('heat')) {
+      map.addSource('heat', { type: 'geojson', data: this.heatFc });
+      map.addLayer({
+        id: 'heat-layer', type: 'heatmap', source: 'heat',
+        paint: {
+          'heatmap-weight': ['interpolate', ['linear'], ['get', 'w'], 0, 0, 1, 1],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 0.6, 6, 1.2, 9, 1.5],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 7, 4, 18, 7, 24],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 5.5, 0.6, 7.5, 0.18, 9, 0],
+          'heatmap-color': [
+            'interpolate', ['linear'], ['heatmap-density'],
+            0, 'rgba(37,99,235,0)', 0.15, '#2563eb', 0.4, '#22c55e', 0.65, '#facc15', 0.85, '#f97316', 1, '#ef4444',
+          ],
+        },
+      });
+    }
+    if (!map.getSource('uncertainty')) {
+      map.addSource('uncertainty', { type: 'geojson', data: this.uncFc });
+      map.addLayer({
+        id: 'uncertainty-fill', type: 'fill', source: 'uncertainty',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['==', ['get', 'sel'], 1], 0.2, 0.08] },
+      });
+      map.addLayer({
+        id: 'uncertainty-line', type: 'line', source: 'uncertainty',
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': ['case', ['==', ['get', 'sel'], 1], 2.2, 1.2],
+          'line-opacity': ['case', ['==', ['get', 'sel'], 1], 0.95, 0.6],
+        },
+      });
+    }
+    this.pushData();
+  }
+
+  private pushData(): void {
+    if (!this.styleReady) return;
+    (this.map.getSource('heat') as { setData?: (d: Fc) => void } | undefined)?.setData?.(this.heatFc);
+    (this.map.getSource('uncertainty') as { setData?: (d: Fc) => void } | undefined)?.setData?.(this.uncFc);
+  }
+
+  private buildOverlayData(): void {
+    const r = this.result;
+    this.heatFc = {
+      type: 'FeatureCollection',
+      features: (r?.heat ?? []).map(([lat, lon, w]) => ({
+        type: 'Feature', properties: { w }, geometry: { type: 'Point', coordinates: [lon, lat] },
+      })),
+    };
+    this.uncFc = {
+      type: 'FeatureCollection',
+      features: (r?.guesses ?? []).map((g, i) => ({
+        type: 'Feature',
+        properties: { color: CONF_COLOR[this.theme][g.label], sel: i === this.selected ? 1 : 0 },
+        geometry: { type: 'Polygon', coordinates: [geodesicCircle(g.lat, g.lon, g.radius_km)] },
+      })),
+    };
+  }
+
+  /** Shows a result: heat, uncertainty circles and the pins. Does not move the camera. */
+  setResult(result: Result | null, selected = 0): void {
+    this.result = result;
+    this.selected = selected;
+    this.buildOverlayData();
+    this.pushData();
+    this.buildPins();
+  }
+
+  /** Highlights one guess (no camera move). */
+  highlight(index: number): void {
+    if (!this.result) return;
+    this.selected = index;
+    this.buildOverlayData();
+    this.pushData();
+    this.updatePinClasses();
+  }
+
+  private buildPins(): void {
+    this.pins.forEach((m) => m.remove());
+    this.pins = [];
+    const r = this.result;
+    if (!r) return;
+    if (r.exif_gps) {
+      const el = document.createElement('div');
+      el.className = 'gl-pin gl-pin-exif';
+      el.title = "Photo's own GPS (not used for the guess)";
+      el.setAttribute('aria-label', "Photo's own GPS location");
+      el.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.5 1.3 6.6L12 17.3l-5.9 3.2 1.3-6.6-4.9-4.5 6.6-.8z" fill="currentColor"/></svg>';
+      this.pins.push(new Marker({ element: el }).setLngLat([r.exif_gps.lon, r.exif_gps.lat]).addTo(this.map));
+    }
+    for (const a of r.analysts) {
+      if (!a.ok) continue;
+      const letter = a.provider === 'claude' ? 'C' : 'G';
+      a.guesses.forEach((g, gi) => {
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = `gl-pin gl-pin-llm gl-pin-${a.provider}${gi ? ' is-secondary' : ''}`;
+        const place = [g.place, g.country].filter(Boolean).join(', ');
+        el.title = `${a.name} #${gi + 1}: ${place} (±${Math.round(g.radius_km)} km)`;
+        el.setAttribute('aria-label', el.title);
+        el.innerHTML = `<span>${letter}${gi ? gi + 1 : ''}</span>`;
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.flyTo(g.lat, g.lon, g.radius_km);
+        });
+        this.pins.push(new Marker({ element: el }).setLngLat([g.lon, g.lat]).addTo(this.map));
+      });
+    }
+    // Added last so that the primary guesses sit on top; rank 1 is the very top.
+    for (let i = r.guesses.length - 1; i >= 0; i--) {
+      const g = r.guesses[i];
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'gl-pin gl-pin-guess';
+      el.dataset.label = g.label;
+      el.dataset.rank = String(i + 1);
+      const t = guessTitle(g);
+      el.title = `#${i + 1} ${t.main}`;
+      el.setAttribute('aria-label', `Guess ${i + 1}: ${t.main}`);
+      el.innerHTML = `<span>${i + 1}</span>`;
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.cb.onGuessClick(i);
+      });
+      this.pins.push(new Marker({ element: el }).setLngLat([g.lon, g.lat]).addTo(this.map));
+    }
+    this.updatePinClasses();
+  }
+
+  private updatePinClasses(): void {
+    this.pins.forEach((m) => {
+      const el = m.getElement();
+      if (el.classList.contains('gl-pin-guess')) {
+        el.classList.toggle('is-selected', Number(el.dataset.rank) - 1 === this.selected);
+      }
+    });
+  }
+
+  // ----------------------------------------------------------- camera
+
+  flyTo(lat: number, lon: number, radiusKm: number): void {
+    const zoom = radiusKm < 30 ? 8.6 : radiusKm < 100 ? 6.9 : radiusKm < 300 ? 5.8 : 4.6;
+    this.map.flyTo({ center: [lon, lat], zoom, duration: 900, essential: true });
+  }
+
+  /** Frames the top guesses; one faint far-off guess must not zoom out to the whole world. */
+  fitToResult(): void {
+    const r = this.result;
+    if (!r || !r.guesses.length) return;
+    const pts: [number, number][] = [];
+    const top = r.guesses[0];
+    pts.push([top.lon, top.lat]);
+    for (const g of r.guesses.slice(1)) {
+      if (g.confidence >= 0.25 * top.confidence) pts.push([g.lon, g.lat]);
+    }
+    for (const a of r.analysts) {
+      if (a.ok && a.guesses[0]) pts.push([a.guesses[0].lon, a.guesses[0].lat]);
+    }
+    if (r.exif_gps) pts.push([r.exif_gps.lon, r.exif_gps.lat]);
+    if (pts.length === 1) {
+      this.map.flyTo({ center: pts[0], zoom: 6.2, duration: 900, essential: true });
+      return;
+    }
+    const bounds = new LngLatBounds(pts[0], pts[0]);
+    pts.forEach((p) => bounds.extend(p));
+    this.map.fitBounds(bounds, {
+      padding: { top: 90, bottom: 80, left: 70, right: 70 },
+      maxZoom: 5.4,
+      duration: 900,
+      essential: true,
+    });
+  }
+
+  zoomBy(delta: number): void {
+    if (delta > 0) this.map.zoomIn({ duration: 250 });
+    else this.map.zoomOut({ duration: 250 });
+  }
+
+  resize(): void {
+    this.map.resize();
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.pins.forEach((m) => m.remove());
+    this.pins = [];
+    this.map.remove();
+  }
+}
+
+/** The live map, for components outside MapView (inspector pins, toolbar buttons). */
+export const mapHandle: { current: GeoMap | null } = { current: null };

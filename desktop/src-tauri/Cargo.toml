@@ -1,0 +1,36 @@
+[package]
+name = "geolock-desktop"
+version = "0.2.0"
+description = "GeoLock desktop shell"
+authors = ["GeoLock"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "geolock_desktop_lib"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-window-state = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"

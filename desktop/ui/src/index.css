@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ tokens */
+/* Dark is the default; [data-theme] is set by the app (and by index.html before first paint). */
+:root,
+:root[data-theme="dark"] {
+  --bg: #07090c;
+  --surface: #0e1116;
+  --surface-2: #131820;
+  --surface-3: #1a2029;
+  --surface-glass: rgb(16 20 27 / 0.74);
+  --border: #1f2630;
+  --border-strong: #2d3642;
+  --fg: #e9ecf2;
+  --fg-2: #a4adbb;
+  --fg-3: #6e7888;
+  --accent: #8ba7ff;
+  --accent-strong: #6d8cff;
+  --accent-soft: rgb(139 167 255 / 0.14);
+  --accent-fg: #0a0f22;
+  --high: #34d399;
+  --medium: #fbbf24;
+  --low: #8ea3c7;
+  --pin-fg: #0b0f14;
+  --pos: #34d399;
+  --neg: #f87171;
+  --danger: #f87171;
+  --danger-soft: rgb(248 113 113 / 0.12);
+  --claude: #eb9a6f;
+  --chatgpt: #2dd4bf;
+  --shadow: 0 18px 50px rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 6px 18px rgb(0 0 0 / 0.32);
+  --scrim: rgb(4 6 9 / 0.62);
+  --ring-track: #222b36;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #eceff3;
+  --surface: #ffffff;
+  --surface-2: #f6f7f9;
+  --surface-3: #eceef2;
+  --surface-glass: rgb(255 255 255 / 0.8);
+  --border: #e2e5ea;
+  --border-strong: #cdd2da;
+  --fg: #111419;
+  --fg-2: #4d5563;
+  --fg-3: #858d9b;
+  --accent: #4262e6;
+  --accent-strong: #3550d6;
+  --accent-soft: rgb(66 98 230 / 0.1);
+  --accent-fg: #ffffff;
+  --high: #059669;
+  --medium: #d97706;
+  --low: #5b6f94;
+  --pin-fg: #ffffff;
+  --pos: #047857;
+  --neg: #dc2626;
+  --danger: #dc2626;
+  --danger-soft: rgb(220 38 38 / 0.08);
+  --claude: #c4642f;
+  --chatgpt: #0f8f7d;
+  --shadow: 0 18px 44px rgb(20 28 40 / 0.16);
+  --shadow-sm: 0 4px 14px rgb(20 28 40 / 0.1);
+  --scrim: rgb(20 26 36 / 0.36);
+  --ring-track: #e4e7ec;
+  color-scheme: light;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-high: var(--high);
+  --color-medium: var(--medium);
+  --color-low: var(--low);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-claude: var(--claude);
+  --color-chatgpt: var(--chatgpt);
+  --radius-card: 14px;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ------------------------------------------------------------------- base */
+@layer base {
+  html, body, #root { height: 100%; }
+}
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow: hidden;
+  user-select: none;
+}
+input, textarea, [contenteditable="true"] { user-select: text; }
+@layer base {
+  button { font: inherit; color: inherit; }
+}
+img { -webkit-user-drag: none; }
+::selection { background: var(--accent-soft); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+[hidden] { display: none !important; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.glass {
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------------------------------------------------------- animations */
+@keyframes gl-spin { to { transform: rotate(360deg); } }
+@keyframes gl-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes gl-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes gl-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes gl-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes gl-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: 0.85; } }
+@keyframes gl-ring { 0% { transform: scale(0.8); opacity: 0.55; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes gl-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes gl-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+@keyframes gl-dash { to { stroke-dashoffset: -28; } }
+@keyframes gl-slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.animate-spin-slow { animation: gl-spin 0.9s linear infinite; }
+.shimmer {
+  background: linear-gradient(90deg, transparent 0%, var(--accent-soft) 50%, transparent 100%) no-repeat;
+  background-size: 200% 100%;
+  animation: gl-shimmer 1.6s linear infinite;
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--surface-2) 50%, var(--surface-3) 75%);
+  background-size: 200% 100%;
+  animation: gl-shimmer 1.4s linear infinite;
+  border-radius: 8px;
+}
+.enter { animation: gl-fade-up 220ms var(--ease-out) both; }
+.fade-in { animation: gl-fade 180ms ease-out both; }
+.pop-in { animation: gl-pop 160ms var(--ease-out) both; }
+.slide-in { animation: gl-slide-in 260ms var(--ease-out) both; }
+
+/* --------------------------------------------------------------- map pins */
+.maplibregl-ctrl-attrib { display: none !important; }
+.gl-pin {
+  position: relative;
+  width: 26px; height: 26px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font: 650 12px/1 var(--font-sans); font-variant-numeric: tabular-nums;
+  color: var(--pin-fg);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+  cursor: pointer; padding: 0;
+  transition: transform 180ms var(--ease-out), box-shadow 180ms;
+}
+.gl-pin:hover { transform: scale(1.12); }
+.gl-pin-guess { width: 30px; height: 30px; font-size: 13px; }
+.gl-pin-guess[data-label="high"] { background: var(--high); }
+.gl-pin-guess[data-label="medium"] { background: var(--medium); }
+.gl-pin-guess[data-label="low"] { background: var(--low); }
+.gl-pin-guess[data-rank="1"] { width: 34px; height: 34px; }
+.gl-pin-guess.is-selected {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 4px var(--accent), 0 4px 14px rgb(0 0 0 / 0.5);
+  z-index: 2;
+}
+.gl-pin-guess[data-rank]:not(.is-selected):not([data-rank="1"]) { opacity: 0.92; }
+.gl-pin-exif {
+  width: 26px; height: 26px; background: #0b0f14; color: #fbbf24; border-color: #fbbf24; cursor: default;
+}
+.gl-pin-exif:hover { transform: none; }
+.gl-pin-llm {
+  border-radius: 9px; width: 26px; height: 26px; color: #fff; border-color: #fff;
+  background: var(--claude);
+}
+.gl-pin-chatgpt { background: var(--chatgpt); }
+.gl-pin-llm.is-secondary { width: 22px; height: 22px; opacity: 0.8; font-size: 11px; }
+.gl-pin-llm span { line-height: 1; }
+
+/* ------------------------------------------------------------- detail */
+.country-odds-track { background: var(--surface-3); }
+.setup-steps > li + li::before {
+  content: ""; position: absolute; left: 11px; top: -10px; height: 10px; width: 2px; background: var(--border);
+}
+.drop-dash { stroke-dasharray: 6 8; animation: gl-dash 1.2s linear infinite; }
+.lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

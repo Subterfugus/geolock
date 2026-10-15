@@ -1,0 +1,212 @@
+# GeoLock desktop: backend API
+
+The desktop app is three parts:
+
+| Part | Where | What |
+|---|---|---|
+| Shell | `desktop/src-tauri/` | Tauri 2 (Rust). Opens the window, starts the backend, stops it on exit. |
+| UI | `desktop/ui/` | React + TypeScript + Vite + MapLibre GL. Talks to the backend over HTTP. |
+| Backend | `geolock/desktop/` | The existing Python engine behind FastAPI, frozen with PyInstaller into `geolock-backend.exe`. |
+
+## How the shell starts the backend
+
+1. The shell picks a free port on 127.0.0.1 and a random 32-character token.
+2. It runs `geolock-backend.exe --port <port> --token <token> --data-dir <dir>` with no console
+   window (`CREATE_NO_WINDOW`). `<dir>` is Tauri's app local data dir
+   (`%LOCALAPPDATA%\com.geolock.desktop`). The backend's stdin is a pipe; the backend exits
+   when it reads EOF, so it dies with the shell even after a crash.
+3. The UI calls the Tauri command `backend_info` → `{ "url": "http://127.0.0.1:<port>",
+   "token": "<token>", "dataDir": "<dir>", "logFile": "<path>" }` and polls `GET /api/status`
+   until it answers.
+4. On exit the shell kills the backend process.
+
+Dev without Tauri: `python -m geolock.desktop --port 7861 --no-token` (real engine) or
+`node desktop/ui/mock/server.mjs` (fake data, also on port 7861). The UI uses
+`VITE_BACKEND_URL` (default `http://127.0.0.1:7861`) and no token when `window.__TAURI__`
+is absent.
+
+## Conventions
+
+- Every `/api/*` request carries the header `X-GeoLock-Token: <token>`. URLs used in
+  `<img src>` carry it as `?t=<token>` instead. `/data/*` needs no token.
+- CORS allows `http://tauri.localhost`, `tauri://localhost`, `http://localhost:1420`
+  and `http://127.0.0.1:1420`.
+- Errors: HTTP 4xx/5xx with `{"detail": "human readable message"}`.
+- Times are ISO 8601 UTC strings. Probabilities are 0..1. Distances are km.
+
+## Status and first-run setup
+
+### `GET /api/status`
+```json
+{
+  "state": "needs_setup",          // needs_setup | setting_up | loading | ready | error
+  "error": null,                   // message when state == "error"
+  "version": "0.2.0",
+  "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
+  "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
+  "available_devices": ["CPU", "GPU", "NPU"],
+  "analysts": {
+    "claude":  {"available": true,  "via": "claude-code", "detail": "Claude Code, your Claude login"},
+    "chatgpt": {"available": false, "via": null, "detail": "Install the Codex CLI and sign in (codex login) to use your ChatGPT plan."}
+  },
+  "data_dir": "C:\\Users\\Brady\\AppData\\Local\\com.geolock.desktop",
+  "models_dir": "C:\\Users\\Brady\\AppData\\Local\\com.geolock.desktop\\models"
+}
+```
+`loading` = models are on disk and being compiled for the device (10-60 s on first start,
+a few seconds after that thanks to the OpenVINO cache).
+
+### `GET /api/setup`
+```json
+{
+  "ready": false,
+  "running": false,
+  "download_mb": 608,              // what "Download" will fetch
+  "disk_needed_mb": 1400,          // peak disk use during setup
+  "free_disk_mb": 412000,
+  "source": "Hugging Face (Xenova/clip-vit-large-patch14, MIT licence)",
+  "steps": [
+    {"id": "download", "label": "Download the CLIP vision model", "state": "pending"},   // pending | running | done | error
+    {"id": "convert",  "label": "Optimise it for your processor",  "state": "pending"},
+    {"id": "gallery",  "label": "Build the map of 100,000 reference places", "state": "pending"},
+    {"id": "load",     "label": "Load the models", "state": "pending"}
+  ],
+  "progress": {                    // null when not running
+    "step": "download",
+    "fraction": 0.42,              // 0..1 within this step, null if unknown
+    "done_mb": 255.3, "total_mb": 608.0,
+    "speed_mbps": 11.2,            // megabytes per second, download step only
+    "eta_s": 31,
+    "message": "Downloading… 255 of 608 MB"
+  },
+  "error": null
+}
+```
+
+### `POST /api/setup/start`
+Starts (or resumes) the download and setup in the background. Returns `GET /api/setup`.
+A partial download resumes where it stopped.
+
+### `POST /api/setup/cancel`
+Stops a running setup; the partial download is kept for resuming.
+
+### `POST /api/setup/import`  body `{"folder": "C:\\path\\to\\geolock\\models"}`
+Uses models from an existing GeoLock install (the folder with `clip_vision.xml`). Copies
+what is needed. 400 with a readable message if the folder is not a GeoLock models folder.
+
+## Locating photos
+
+### `POST /api/locate`  (multipart form)
+| field | type | default | |
+|---|---|---|---|
+| `file` | file | required | JPEG, PNG, WebP, HEIC, TIFF, BMP |
+| `name` | string | file name | shown in the library |
+| `ocr` | bool | true | read text in the photo |
+| `exif_gps` | bool | true | show the photo's own GPS (never used for the guess) |
+| `ask` | string | "" | comma list of `claude`, `chatgpt`. **The UI never sends this unless the user clicked a second-opinion button for this photo.** |
+| `share_local` | bool | true | send GeoLock's findings to the analyst along with the photo |
+
+Returns a **Result** (below) and stores it in the library. Takes 1-5 s locally, plus
+5-60 s per analyst. Requests are processed one at a time.
+
+### Result
+```json
+{
+  "id": "20261014-235501-a1b2c3",
+  "name": "IMG_2041.jpg",
+  "created": "2026-10-14T23:55:01Z",
+  "image_url": "/api/history/20261014-235501-a1b2c3/image",   // add ?t=<token>
+  "thumb_url": "/api/history/20261014-235501-a1b2c3/thumb",
+  "image": {"width": 4032, "height": 3024},
+  "options": {"ocr": true, "exif_gps": true, "ask": [], "share_local": true},
+  "guesses": [
+    {
+      "lat": 48.85341, "lon": 2.3488,
+      "confidence": 0.46,                    // share of probability within 250 km
+      "label": "medium",                     // high (>=0.5) | medium (>=0.2) | low
+      "radius_km": 38.5,                     // 68 % of this guess's probability is within it
+      "visual_mass": 0.31,
+      "country_code": "FR", "country": "France", "continent": "Europe",
+      "region": "Île-de-France",
+      "place": {"name": "Paris", "admin1": "Île-de-France", "cc": "FR", "km": 1.2},  // may be null
+      "km_from_exif": 3.4,                   // only when the photo has GPS
+      "why": [
+        {"effect": 1,  "text": "Visual similarity (GeoCLIP) puts 31% of its weight in this area."},
+        {"effect": 1,  "text": "CLIP's country classifier ranks France #1 (22%)."},
+        {"effect": 1,  "text": "Text in French"},
+        {"effect": -1, "text": "Traffic drives on the left"}
+      ]                                      // effect: 1 supports, 0 neutral, -1 argues against
+    }
+  ],
+  "countries": [{"code": "FR", "name": "France", "prob": 0.58, "clip_prob": 0.22}],
+  "clues": [
+    {"kind": "language", "title": "Text in French", "detail": "Language detector: 92% (\"boulangerie, rue…\").",
+     "strength": 0.7, "countries": [{"code": "FR", "name": "France", "weight": 1.0}], "n_countries": 12}
+  ],
+  // kind: ocr | language | script | domain | phone | currency | units | scene | timezone | exif
+  //       | claude | chatgpt | vlm ; strength 0 = shown only, no effect on the guess
+  "scene": [{"attribute": "Setting", "value": "city street", "prob": 0.61}],
+  "ocr": [{"text": "BOULANGERIE", "score": 0.97, "box": [[x,y],[x,y],[x,y],[x,y]], "model": "default"}],
+  //   box is in original-image pixel coordinates (4 corners)
+  "analysts": [
+    {"provider": "claude", "name": "Claude", "via": "Claude Code, your Claude login", "ok": true,
+     "error": null, "model": "claude-opus-5-5", "ms": 8400,
+     "reasoning": "Haussmann façades, Paris street signs…",
+     "clues": [{"clue": "Blue enamel street sign", "suggests": "Paris"}],
+     "driving_side": "right", "text_seen": "Rue de Rivoli",
+     "guesses": [{"place": "Rue de Rivoli, Paris", "country": "France", "iso2": "FR",
+                  "lat": 48.8606, "lon": 2.3376, "radius_km": 2, "confidence": 0.7, "km_from_exif": 1.1}]}
+  ],
+  "heat": [[48.85, 2.35, 1.0], [45.76, 4.83, 0.31]],   // [lat, lon, weight 0..1], up to 1500 points
+  "exif": {"camera": "Apple iPhone 15", "datetime": "2026:07:03 14:22:10", "utc_offset": "+02:00",
+           "gps": {"lat": 48.8530, "lon": 2.3499}},
+  "exif_gps": {"lat": 48.8530, "lon": 2.3499},          // null unless shown
+  "exif_place": {"country": "France", "region": "Île-de-France", "place": {"name": "Paris"}},
+  "device": "GPU",
+  "timings": {"clip_ms": 210, "ocr_ms": 640, "fusion_ms": 380, "llm_ms": 8400, "total_ms": 9700}
+}
+```
+
+## Library (history)
+
+Results are kept in `<data-dir>/history/` with a 2048 px copy of the photo (EXIF kept so a
+re-run still sees the camera clock and GPS) and a 320 px thumbnail.
+
+### `GET /api/history` → newest first
+```json
+[{"id": "…", "name": "IMG_2041.jpg", "created": "…", "thumb_url": "/api/history/…/thumb",
+  "top": {"lat": 48.85, "lon": 2.35, "confidence": 0.46, "label": "medium",
+          "country": "France", "country_code": "FR", "place": "Paris", "region": "Île-de-France"},
+  "analysts": ["claude"], "has_exif_gps": true, "km_from_exif": 3.4}]
+```
+
+### `GET /api/history/{id}` → Result
+### `DELETE /api/history/{id}` → `{"ok": true}`
+### `DELETE /api/history` → clears everything, `{"ok": true, "deleted": 12}`
+### `POST /api/history/{id}/rerun`  (form: `ocr`, `exif_gps`, `ask`, `share_local`) → Result
+Re-analyses the stored photo (same id). This is how "Ask Claude" / "Ask ChatGPT" on an
+existing photo works. Earlier analyst answers are kept unless that analyst is asked again.
+### `GET /api/history/{id}/image` and `/thumb` → JPEG
+
+## Settings
+
+### `GET /api/settings`, `PUT /api/settings` (JSON body with any subset) → full settings
+```json
+{
+  "device": "AUTO",            // AUTO | GPU | NPU | CPU; change reloads the models (state -> loading)
+  "read_text": true,           // default for the ocr option
+  "show_exif_gps": true,
+  "share_findings": true,      // default for share_local when asking an analyst
+  "keep_history": true,        // false: results are not stored (the current session still shows them)
+  "theme": "system",           // system | light | dark (the UI applies it)
+  "map_style": "offline"       // offline | streets | satellite (UI default)
+}
+```
+There is deliberately **no** setting that asks Claude or ChatGPT automatically.
+
+### `POST /api/analysts/refresh` → `{"claude": {...}, "chatgpt": {...}}` (re-checks logins)
+
+## Static data
+`GET /data/countries.geojson` (242 countries; properties `iso2, name, continent, subregion,
+lx, ly, minlabel` where `lx/ly` is the label point and `minlabel` the zoom to show it at) and
+`GET /data/admin1.geojson` (4,596 states/provinces, 3.6 MB; properties include `name`).

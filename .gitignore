@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 /.venv-cuda/
 /data/
+/build/
+/desktop/backend-dist/
+/geolock/desktop/bundled/

@@ -1,0 +1,11 @@
+# Rust build output
+/target/
+
+# npm packages for the Tauri CLI (restored by `npm ci`)
+/node_modules/
+
+# Mobile scaffolding is not used by this desktop app
+/gen/android/
+/gen/apple/
+
+# Note: gen/schemas (capability JSON schemas) and Cargo.lock are committed on purpose.

@@ -3,7 +3,7 @@
 Living notes on what GeoLock is, how it works, what state it is in and what comes next.
 Updated with every change.
 
-_Last updated: 2026-10-14_
+_Last updated: 2026-10-15_
 
 ## Goal
 
@@ -22,6 +22,7 @@ confidence and the clues for each guess.
 | Deep analysis with a local vision-language model | Built but **not part of the plan** (Brady, 2026-10-14): the Claude / ChatGPT second opinion covers this; never run |
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
+| **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Built (PR #11). Backend frozen and smoke-tested on a Windows CI runner with the real model download; installer built in CI. Not yet run on the laptop |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
 | Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
 | Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
@@ -152,6 +153,36 @@ OpenVINO GenAI on the Arc GPU. It is asked for structured JSON: observations, dr
 side, text, country guesses. Those become clues at moderate weight. Expect seconds to
 tens of seconds per photo; smaller option: `setup_models --vlm Qwen/Qwen2-VL-2B-Instruct`.
 
+## Desktop app
+
+GeoLock is a normal Windows app: a per-user installer (no admin prompt) adds it to the
+Start menu, and it runs in its own window. The browser version (`run.bat`) still works.
+
+- **Shell** (`desktop/src-tauri`, Tauri 2 / Rust): picks a free local port and a random
+  token, starts the backend with no console window, and kills it on exit (Job Object, and
+  the backend also exits when its stdin closes).
+- **Backend** (`geolock/desktop`, frozen with PyInstaller into `geolock-backend.exe`): the
+  engine behind a token-protected API on 127.0.0.1 (`desktop/API.md`). Data lives in
+  `%LOCALAPPDATA%\com.geolock.desktop` (models, library, settings).
+- **UI** (`desktop/ui`, React + TypeScript + MapLibre): library of past photos, big map
+  with heatmap, uncertainty circles and the photo's own GPS, an inspector with the best
+  guess, other guesses, reasons, country odds, clues and the Claude / ChatGPT second
+  opinion (per photo, only on click), settings (processor, defaults, analysts, theme).
+  Drag and drop anywhere, paste, Ctrl+O. Offline basemap; Streets and Satellite layers
+  when online.
+- **First run**: the installer carries the small assets (GeoCLIP weights, gallery
+  coordinates, prompt embeddings, calibration, OCR models). The CLIP ViT-L/14 vision
+  encoder (609 MB) is downloaded once from Hugging Face as the Xenova ONNX export, pinned
+  by commit and SHA-256, and converted to OpenVINO on the machine, so PyTorch is never
+  needed. "Use models from an existing GeoLock folder" skips the download.
+- **Build**: `.github/workflows/desktop.yml`. A Linux job builds the assets with PyTorch
+  and checks the ONNX model's embeddings against PyTorch (cosine > 0.999). A Windows job
+  freezes the backend, runs `tools/desktop_smoke.py` (real download, convert, locate a
+  photo with text, clean exit), then builds the NSIS installer. Pushes to main publish it
+  as a GitHub release.
+- **Gotcha**: OpenBLAS's thread pool hung after OpenVINO had run in the same process
+  (at DLL load on Windows, in a matmul on Linux), so the backend runs BLAS single-threaded.
+
 ## Layout
 
 | Path | What |
@@ -167,6 +198,9 @@ tens of seconds per photo; smaller option: `setup_models --vlm Qwen/Qwen2-VL-2B-
 | `geolock/testset.py` | Downloads the Wikimedia Commons test set |
 | `tools/build_geodata.py` | Rebuilds the bundled Natural Earth files |
 | `tools/build_inat_testset.py` | Builds a test set from iNaturalist open data (fallback) |
+| `geolock/desktop/` | Desktop backend: API server, first-run model setup, library, settings |
+| `desktop/` | Desktop shell (`src-tauri`), UI (`ui`), PyInstaller spec (`backend`), `API.md` |
+| `tools/build_app_assets.py`, `tools/desktop_smoke.py` | CI: installer assets, frozen-backend smoke test |
 | `tests/` | `pytest`; engine tests run when models are present |
 
 Models live in `models/` (git-ignored, about 0.8 GB FP16; another ~5 GB with the VLM).
@@ -352,6 +386,10 @@ about real-photo accuracy yet.
 7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
 
 ## Changelog
+
+- **2026-10-15**: Windows desktop app (PR #11): Tauri window and installer, new UI with
+  a photo library, first-run model download without PyTorch, settings. Re-running a photo
+  keeps earlier Claude / ChatGPT answers instead of asking again.
 
 - **2026-10-14**: Local vision-language model dropped from the plan (Brady's call); the
   Claude / ChatGPT second opinion is the deep-analysis path. A Qwen2.5-VL-7B test on the
