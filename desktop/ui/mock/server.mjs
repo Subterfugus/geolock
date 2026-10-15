@@ -188,12 +188,14 @@ function svgPhoto(label, [c1, c2, c3], w, h, kind = 'city') {
 }
 
 // ------------------------------------------------------------- analyst answers
-function claudeAnswer(res, guesses, reasoning, clues, side, text) {
+function claudeAnswer(res, guesses, reasoning, checklist, side, text, extra = {}) {
   const exif = res.exif_gps;
   const pts = guesses.map((g) => ({ ...g, km_from_exif: exif ? +haversine(exif.lat, exif.lon, g.lat, g.lon).toFixed(1) : null }));
+  const clues = checklist.map((c) => ({ clue: `${c.label}: ${c.seen}`, suggests: c.suggests }));
   return {
     provider: 'claude', name: 'Claude', via: 'Claude Code, your Claude login', ok: true, error: null,
-    model: 'claude-opus-5-5', ms: 8400, reasoning, clues, driving_side: side, text_seen: text, guesses: pts,
+    model: 'claude-opus-5-5', ms: 8400, reasoning, checklist, clues, ruled_out: [], crops: [],
+    driving_side: side, text_seen: text, guesses: pts, ...extra,
   };
 }
 
@@ -250,11 +252,22 @@ function seedResults() {
       { text: 'Rue de Rivoli', score: 0.93, box: [[1450, 1100], [2130, 1100], [2130, 1180], [1450, 1180]], model: 'default' },
     ],
     analysts: [claudeAnswer({ exif_gps: { lat: 48.853, lon: 2.3499 } }, [
-      { place: 'Rue de Rivoli, Paris', country: 'France', iso2: 'FR', lat: 48.8606, lon: 2.3376, radius_km: 2, confidence: 0.7 },
-      { place: 'Marais, Paris', country: 'France', iso2: 'FR', lat: 48.8575, lon: 2.3602, radius_km: 3, confidence: 0.15 },
+      { place: 'Rue de Rivoli, Paris', country: 'France', iso2: 'FR', lat: 48.8606, lon: 2.3376, radius_km: 2, confidence: 0.7,
+        why: 'The street sign names Rue de Rivoli, and the arcades fit its 1st arrondissement stretch.' },
+      { place: 'Marais, Paris', country: 'France', iso2: 'FR', lat: 48.8575, lon: 2.3602, radius_km: 3, confidence: 0.15,
+        why: 'Rue de Rivoli continues east into the Marais with the same façades.' },
     ], 'Haussmann façades, a blue enamel street sign reading “Rue de Rivoli”, and the French bakery signage all point to central Paris. The cars and the pavement fit France.',
-    [{ clue: 'Blue enamel street sign', suggests: 'Paris' }, { clue: 'Haussmann-style façades', suggests: 'Paris, 19th century' }, { clue: 'Bakery sign in French', suggests: 'France' }],
-    'right', 'Rue de Rivoli')],
+    [
+      { category: 'driving_side', label: 'Driving side', seen: 'Parked cars face the right-hand flow', suggests: 'Right-hand traffic; rules out the UK' },
+      { category: 'road_markings', label: 'Road lines', seen: 'White dashed lines, no yellow', suggests: 'Continental Europe' },
+      { category: 'signs', label: 'Signs', seen: 'Blue enamel street plate with a green border', suggests: 'Paris street name plate' },
+      { category: 'script_language', label: 'Text and language', seen: '“BOULANGERIE”, “Rue de Rivoli”', suggests: 'French; Rue de Rivoli is in Paris' },
+      { category: 'architecture', label: 'Architecture', seen: 'Cream stone façades, wrought-iron balconies, mansard roofs', suggests: 'Haussmann-era Paris' },
+    ],
+    'right', 'Rue de Rivoli', {
+      ruled_out: [{ place: 'Brussels', why: 'Brussels street signs are bilingual French and Dutch.' }, { place: 'Quebec', why: 'Quebec stop signs and plates look different, and the façades are Parisian.' }],
+      crops: [{ box: [330, 700, 1880, 950], text: 'BOULANGERIE / PÂTISSERIE' }, { box: [1380, 1040, 2200, 1240], text: 'Rue de Rivoli' }],
+    })],
     heat: [], exif: { camera: 'Apple iPhone 15', datetime: '2026:07:03 14:22:10', utc_offset: '+02:00', gps: { lat: 48.853, lon: 2.3499 } },
     exif_gps: { lat: 48.853, lon: 2.3499 }, exif_place: { country: 'France', region: 'Île-de-France', place: { name: 'Paris' } },
     device: 'GPU', timings: { clip_ms: 210, ocr_ms: 640, fusion_ms: 380, llm_ms: 8400, total_ms: 9700 },
@@ -558,7 +571,7 @@ async function route(req, res) {
         const claude = claudeAnswer(r, [
           { place: `${top.place?.name ?? top.country}, ${top.country}`, country: top.country, iso2: top.country_code, lat: top.lat + 0.01, lon: top.lon - 0.01, radius_km: 3, confidence: 0.64 },
         ], `Looking at the scene, I'd place this in ${top.place?.name ?? top.country}. The architecture, the signage and the light all agree with ${top.country}.`,
-        [{ clue: 'Local signage', suggests: top.country }, { clue: 'Street layout', suggests: top.place?.name ?? top.region }], 'right', null);
+        [{ category: 'signs', label: 'Signs', seen: 'Local signage', suggests: top.country }, { category: 'other', label: 'Other', seen: 'Street layout', suggests: top.place?.name ?? top.region }], 'right', null);
         r.analysts = [...others, claude];
       }
       r.options = { ...r.options, ask: ask.filter((a) => a) };

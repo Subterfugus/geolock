@@ -133,12 +133,28 @@ export interface AnalystGuess {
   lon: number;
   radius_km: number;
   confidence: number;
+  /** One sentence: the evidence for this guess over the others. */
+  why?: string | null;
   km_from_exif?: number | null;
 }
 
 export interface AnalystClue {
   clue: string;
   suggests?: string | null;
+}
+
+/** One item of the geoguessing checklist the analyst went through. */
+export interface AnalystCheck {
+  category: string;
+  label: string;
+  seen: string;
+  suggests: string;
+}
+
+/** A zoomed crop of a sign sent along with the photo; box is [x0, y0, x1, y1] in photo pixels. */
+export interface AnalystCrop {
+  box: [number, number, number, number];
+  text: string;
 }
 
 export interface Analyst {
@@ -150,6 +166,10 @@ export interface Analyst {
   model: string | null;
   ms: number | null;
   reasoning: string;
+  /** Absent on answers saved before 2026-10-15 (they only have clues). */
+  checklist?: AnalystCheck[];
+  ruled_out?: { place: string; why: string }[];
+  crops?: AnalystCrop[];
   clues: AnalystClue[];
   driving_side: string | null;
   text_seen: string | null;

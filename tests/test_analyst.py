@@ -11,13 +11,20 @@ from PIL import Image
 from geolock import analyst
 from geolock.geodata import GeoData
 
-ANSWER = {"reasoning": "German text and a green motorway-style sign.",
-          "clues": [{"clue": "Hauptbahnhof", "suggests": "Germany"}],
+ANSWER = {"checklist": [{"category": "script_language", "seen": "Hauptbahnhof 2 km",
+                          "suggests": "German: Germany, Austria or Switzerland"},
+                         {"category": "signs", "seen": "yellow direction sign",
+                          "suggests": "Germany; Austria uses blue or green"},
+                         {"category": "driving_side", "seen": "cars on the right",
+                          "suggests": "not UK or Ireland"}],
+          "reasoning": "German text and a yellow direction sign.",
+          "ruled_out": [{"place": "Switzerland", "why": "Swiss direction signs are white on blue"}],
           "driving_side": "right", "text_seen": "Hauptbahnhof 2 km",
           "guesses": [{"place": "Cologne", "country": "Germany", "iso2": "DE", "lat": 50.94,
-                       "lon": 6.96, "radius_km": 50, "confidence": 0.5},
+                       "lon": 6.96, "radius_km": 50, "confidence": 0.5,
+                       "why": "Yellow German direction sign"},
                       {"place": "Vienna", "country": "Austria", "iso2": "AT", "lat": 48.21,
-                       "lon": 16.37, "radius_km": 80, "confidence": 0.2}]}
+                       "lon": 16.37, "radius_km": 80, "confidence": 0.2, "why": "German text"}]}
 
 
 def _fake(tmp_path, name, body):
@@ -39,9 +46,13 @@ if args[:2] == ["auth", "status"]:
     print(json.dumps({"loggedIn": True, "authMethod": "oauth_token"})); sys.exit(0)
 msg = json.loads(sys.stdin.readline())
 content = msg["message"]["content"]
-assert content[0]["type"] == "image" and content[0]["source"]["media_type"] == "image/jpeg"
+images = [c for c in content if c["type"] == "image"]
+assert images and all(c["source"]["media_type"] == "image/jpeg" for c in images)
+assert content[-1]["type"] == "text"
 assert "--json-schema" in args and "--tools" in args
-open(__import__("os").path.join(__import__("os").path.dirname(sys.argv[0]), "claude.prompt"), "w").write(content[1]["text"])
+here = __import__("os").path.dirname(sys.argv[0])
+open(__import__("os").path.join(here, "claude.prompt"), "w").write(content[-1]["text"])
+open(__import__("os").path.join(here, "claude.images"), "w").write(str(len(images)))
 print(json.dumps({"type": "assistant", "message": {"model": "claude-test", "content": []}}))
 print(json.dumps({"type": "result", "is_error": False, "result": "ok",
                   "structured_output": ANSWER}))
@@ -53,10 +64,13 @@ args = sys.argv[1:]
 if args[:2] == ["login", "status"]:
     print("Logged in using ChatGPT"); sys.exit(0)
 assert args[0] == "exec" and "--image" in args and "--output-schema" in args
-img = args[args.index("--image") + 1]
-assert open(img, "rb").read(2) == b"\\xff\\xd8"
+imgs = [args[i + 1] for i, a in enumerate(args) if a == "--image"]
+assert all(open(img, "rb").read(2) == b"\\xff\\xd8" for img in imgs)
+assert args[-1] == "-"  # the prompt comes from stdin, not eaten by --image
 prompt = sys.stdin.read()
 assert "Where on Earth" in prompt
+here = __import__("os").path.dirname(sys.argv[0])
+open(__import__("os").path.join(here, "codex.images"), "w").write(str(len(imgs)))
 out = args[args.index("--output-last-message") + 1]
 open(out, "w").write(json.dumps(ANSWER))
 """
@@ -87,7 +101,67 @@ def test_asks_both_and_strips_metadata(fake_clis):
         assert r["ok"], r["error"]
         assert r["guesses"][0]["iso2"] == "DE" and r["driving_side"] == "right"
     assert res[0]["model"] == "claude-test"
-    assert "Notes from GeoLock" in (fake_clis / "claude.prompt").read_text()
+    prompt = (fake_clis / "claude.prompt").read_text()
+    assert "Notes from GeoLock" in prompt and "Bollards and roadside posts" in prompt
+    assert "Image 1 is the whole photo" not in prompt
+    assert (fake_clis / "claude.images").read_text() == "1"
+    r = res[0]
+    assert [c["category"] for c in r["checklist"]] == ["driving_side", "signs", "script_language"]
+    assert r["checklist"][1]["label"] == "Signs" and r["guesses"][0]["why"]
+    assert r["ruled_out"][0]["place"] == "Switzerland" and r["crops"] == []
+    assert r["clues"][0]["clue"].startswith("Driving side: ")  # flat list for older readers
+
+
+def _sign_photo():
+    """A 2000x1500 photo with a two-line sign at the top left and a plate at the bottom right."""
+    img = Image.new("RGB", (2000, 1500), (70, 120, 60))
+    lines = [{"text": "Hauptbahnhof", "score": 0.95, "box": [[200, 200], [600, 200], [600, 250], [200, 250]]},
+             {"text": "2 km", "score": 0.9, "box": [[220, 270], [400, 270], [400, 320], [220, 320]]},
+             {"text": "K AB 123", "score": 0.7, "box": [[1600, 1300], [1750, 1300], [1750, 1330], [1600, 1330]]},
+             {"text": "huge", "score": 0.99, "box": [[0, 0], [2000, 0], [2000, 1400], [0, 1400]]}]
+    return img, lines
+
+
+def test_sign_crops_group_lines_and_zoom_in():
+    img, lines = _sign_photo()
+    crops = analyst.sign_crops(img, lines)
+    assert len(crops) == 2  # the two sign lines become one crop; the whole-photo box is no zoom
+    sign, plate = crops
+    assert sign["text"] == "Hauptbahnhof / 2 km"
+    x0, y0, x1, y1 = sign["box"]
+    assert x0 < 200 and y0 < 200 and x1 > 600 and y1 > 320 and (x1 - x0) < 1000
+    assert plate["text"] == "K AB 123" and plate["box"][0] < 1600 < plate["box"][2]
+    for c in crops:
+        im = Image.open(__import__("io").BytesIO(c["jpeg"]))
+        assert analyst.CROP_MIN_SIDE <= max(im.size) <= analyst.CROP_SIDE and not im.getexif()
+    assert analyst.sign_crops(img, []) == [] and analyst.sign_crops(img, [{"box": "bad"}]) == []
+    assert len(analyst.sign_crops(img, lines, max_crops=1)) == 1
+
+
+def test_crops_are_sent_after_the_photo(fake_clis):
+    img, lines = _sign_photo()
+    res = analyst.ask_all(["claude", "chatgpt"], img, briefing="Top guesses: 1. Germany", ocr_lines=lines)
+    assert all(r["ok"] for r in res), [r["error"] for r in res]
+    assert (fake_clis / "claude.images").read_text() == "3"
+    assert (fake_clis / "codex.images").read_text() == "3"
+    prompt = (fake_clis / "claude.prompt").read_text()
+    assert "Image 1 is the whole photo" in prompt and "Image 3:" in prompt
+    assert "OCR read “Hauptbahnhof / 2 km”" in prompt
+    assert [c["text"] for c in res[0]["crops"]] == ["Hauptbahnhof / 2 km", "K AB 123"]
+    assert "jpeg" not in res[0]["crops"][0]  # the answer stays JSON-ready
+    # a blind second opinion still gets the crops (they are the photo), not GeoLock's reading
+    analyst.ask_all(["claude"], img, briefing=None, ocr_lines=lines)
+    prompt = (fake_clis / "claude.prompt").read_text()
+    assert "Image 2:" in prompt and "OCR read" not in prompt and "Notes from GeoLock" not in prompt
+
+
+def test_old_answers_still_load():
+    old = {"reasoning": "x", "clues": [{"clue": "Hauptbahnhof", "suggests": "Germany"}],
+           "driving_side": "right", "text_seen": "",
+           "guesses": [{"lat": 50, "lon": 7, "confidence": 0.5, "radius_km": 50, "iso2": "de"}]}
+    d = analyst.clean(old)
+    assert d["checklist"] == [] and d["clues"][0]["clue"] == "Hauptbahnhof"
+    assert d["guesses"][0]["why"] == "" and d["ruled_out"] == []
 
 
 def test_photo_is_resized_and_has_no_exif():
