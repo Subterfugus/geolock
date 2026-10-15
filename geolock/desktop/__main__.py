@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 
@@ -31,6 +32,10 @@ def main(argv=None):
     ap.add_argument("--no-stdin-watch", action="store_true",
                     help="keep running when stdin closes (default when there is no token)")
     a = ap.parse_args(argv)
+    t0 = time.perf_counter()
+    if os.environ.get("GEOLOCK_TRACE"):  # CI: show where a slow or stuck start is
+        import faulthandler
+        faulthandler.dump_traceback_later(float(os.environ["GEOLOCK_TRACE"]), repeat=True)
     if not a.token and not a.no_token:
         ap.error("pass --token (the desktop shell does) or --no-token for development")
 
@@ -42,14 +47,16 @@ def main(argv=None):
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("GEOLOCK_MODELS", str(data_dir / "models"))
 
-    if a.token and not a.no_stdin_watch and sys.stdin is not None:
-        threading.Thread(target=_exit_when_parent_goes, daemon=True).start()
-
+    print(f"GeoLock backend {a.port}: starting", flush=True)
     import uvicorn
     from .server import Backend, create_app
+    print(f"  imports done in {time.perf_counter() - t0:.1f}s", flush=True)
     backend = Backend(data_dir)
     backend.start()
-    print(f"GeoLock backend on http://{a.host}:{a.port}, data in {data_dir}", flush=True)
+    if a.token and not a.no_stdin_watch and sys.stdin is not None:
+        threading.Thread(target=_exit_when_parent_goes, daemon=True).start()
+    print(f"GeoLock backend on http://{a.host}:{a.port}, data in {data_dir} "
+          f"({time.perf_counter() - t0:.1f}s)", flush=True)
     uvicorn.run(create_app(backend, token=a.token), host=a.host, port=a.port, log_level="warning",
                 access_log=False)
 

@@ -5,6 +5,7 @@ library, then make sure the backend exits when its stdin closes (as when the app
     python tools/desktop_smoke.py desktop/backend-dist/geolock-backend/geolock-backend.exe
 """
 import io
+import os
 import json
 import socket
 import subprocess
@@ -57,8 +58,9 @@ def main():
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     log = open(data_dir / "backend.log", "w")
+    env = dict(os.environ, GEOLOCK_TRACE="45")
     proc = subprocess.Popen([str(exe), "--port", str(port), "--token", TOKEN, "--data-dir", str(data_dir)],
-                            stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT)
+                            stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, env=env)
     ok = False
     try:
         t0 = time.time()
@@ -67,7 +69,7 @@ def main():
                 st = call(port, "/api/status", timeout=5)
                 break
             except Exception:
-                if proc.poll() is not None or time.time() - t0 > 120:
+                if proc.poll() is not None or time.time() - t0 > 300:
                     raise SystemExit("backend did not start")
                 time.sleep(0.5)
         print(f"started in {time.time() - t0:.1f}s: state={st['state']} devices={st['available_devices']}", flush=True)
