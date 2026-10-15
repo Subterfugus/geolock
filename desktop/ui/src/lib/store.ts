@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  HistorySummary, MapStyleKind, Provider, Result, Settings, SetupInfo, Status, ThemeMode,
+  HistorySummary, MapStyleKind, Provider, Result, Settings, SetupInfo, Status,
 } from './types';
 
 export interface QueueItem {

@@ -239,7 +239,7 @@ export function Dialog({
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>('[data-autofocus], button, input')?.focus();
+    (ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -257,10 +257,11 @@ export function Dialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 fade-in" style={{ background: 'var(--scrim)' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         ref={ref}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledById}
-        className="pop-in flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow)]"
+        className="pop-in flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow)] outline-none"
         style={{ maxWidth: width }}
       >
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">

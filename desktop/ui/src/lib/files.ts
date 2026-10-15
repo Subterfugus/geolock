@@ -1,13 +1,8 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { readFile } from '@tauri-apps/plugin-fs';
 import { isTauri } from './backend';
 
 export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif'];
 
-const MIME: Record<string, string> = {
-  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-  bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', heic: 'image/heic', heif: 'image/heif',
-};
 
 const extOf = (name: string): string => (name.split('.').pop() ?? '').toLowerCase();
 
@@ -19,29 +14,9 @@ export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-/** Reads files the shell handed us by path (file picker or OS drag and drop). */
-export async function filesFromPaths(paths: string[]): Promise<File[]> {
-  const out: File[] = [];
-  for (const p of paths) {
-    const name = baseName(p);
-    if (!IMAGE_EXTENSIONS.includes(extOf(name))) continue;
-    const bytes = await readFile(p);
-    out.push(new File([new Uint8Array(bytes)], name, { type: MIME[extOf(name)] ?? 'application/octet-stream' }));
-  }
-  return out;
-}
-
-/** Opens the photo picker: the native dialog in the shell, a file input in the browser. */
+/** Opens the photo picker. WebView2 shows the native Windows dialog for a file input, and
+ *  hands back File objects directly, so no file-system permission is needed. */
 export async function pickPhotos(): Promise<File[]> {
-  if (isTauri()) {
-    const picked = await open({
-      multiple: true,
-      directory: false,
-      filters: [{ name: 'Photos', extensions: IMAGE_EXTENSIONS }],
-    });
-    if (!picked) return [];
-    return filesFromPaths(Array.isArray(picked) ? picked : [picked]);
-  }
   return new Promise<File[]>((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';

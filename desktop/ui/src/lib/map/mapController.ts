@@ -81,14 +81,14 @@ export class GeoMap {
   private labelKey = -1;
   private destroyed = false;
 
-  constructor(container: HTMLElement, kind: MapStyleKind, theme: Theme, private cb: GeoMapCallbacks) {
+  constructor(container: HTMLElement, kind: MapStyleKind, theme: Theme, private cb: GeoMapCallbacks, opts: { zoom?: number } = {}) {
     this.kind = kind;
     this.theme = theme;
     this.map = new MapLibreMap({
       container,
       style: this.styleFor(kind, theme),
       center: [12, 24],
-      zoom: 1.7,
+      zoom: opts.zoom ?? 1.7,
       minZoom: 1,
       maxZoom: 12,
       renderWorldCopies: false,
@@ -100,6 +100,8 @@ export class GeoMap {
     });
     this.map.on('style.load', () => this.onStyleLoad());
     this.map.on('zoom', () => this.onZoom());
+    // A static map (setup screen, empty library) does not redraw by itself when data arrives; nudge it.
+    this.map.on('sourcedata', (e) => { if (e.isSourceLoaded) this.map.triggerRepaint(); });
     this.map.on('error', () => {
       // A remote style that never loaded falls back to the offline map.
       if (!this.styleReady && this.kind !== 'offline' && !this.destroyed) this.cb.onStyleFailed(this.kind);
@@ -124,7 +126,6 @@ export class GeoMap {
 
   private onStyleLoad(): void {
     this.styleReady = true;
-    this.map.setProjection({ type: 'globe' });
     this.ensureBasemap();
     this.ensureOverlays();
     this.labelKey = -1;
@@ -138,13 +139,13 @@ export class GeoMap {
     const before = map.getLayer('heat-layer') ? 'heat-layer' : undefined;
     map.setPaintProperty('background', 'background-color', p.ocean);
     if (!map.getSource('countries')) {
-      map.addSource('countries', { type: 'geojson', data: countriesFc as FeatureCollection });
+      map.addSource('countries', { type: 'geojson', data: countriesFc as FeatureCollection, maxzoom: 6, tolerance: 0.4 });
       map.addLayer({ id: 'land', type: 'fill', source: 'countries', paint: { 'fill-color': p.land, 'fill-opacity': 1 } }, before);
       map.addLayer({
         id: 'country-borders', type: 'line', source: 'countries',
         paint: { 'line-color': p.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.4, 5, 1.1] },
       }, before);
-      map.addSource('admin1', { type: 'geojson', data: admin1Fc ?? EMPTY });
+      map.addSource('admin1', { type: 'geojson', data: admin1Fc ?? EMPTY, maxzoom: 6, tolerance: 0.4 });
       map.addLayer({
         id: 'admin1-lines', type: 'line', source: 'admin1', minzoom: 4,
         paint: { 'line-color': p.admin, 'line-width': 0.8, 'line-dasharray': [2, 2.2] },
@@ -204,8 +205,8 @@ export class GeoMap {
         paint: {
           'heatmap-weight': ['interpolate', ['linear'], ['get', 'w'], 0, 0, 1, 1],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 0.6, 6, 1.2, 9, 1.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 7, 4, 18, 8, 30],
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 6.5, 0.55, 9, 0],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 7, 4, 18, 7, 24],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 5.5, 0.6, 7.5, 0.18, 9, 0],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0, 'rgba(37,99,235,0)', 0.15, '#2563eb', 0.4, '#22c55e', 0.65, '#facc15', 0.85, '#f97316', 1, '#ef4444',
@@ -363,7 +364,7 @@ export class GeoMap {
     pts.forEach((p) => bounds.extend(p));
     this.map.fitBounds(bounds, {
       padding: { top: 90, bottom: 80, left: 70, right: 70 },
-      maxZoom: 6.2,
+      maxZoom: 5.4,
       duration: 900,
       essential: true,
     });

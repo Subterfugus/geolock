@@ -3,7 +3,7 @@ import {
   RefreshCw, FolderInput, Clock,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { addPhotos, dismissQueued, reanalyse, removeResult, retryQueued, selectResult, visibleHistory } from '../lib/controller';
+import { addPhotos, askDelete, dismissQueued, reanalyse, retryQueued, selectResult, visibleHistory } from '../lib/controller';
 import { assetUrl } from '../lib/backend';
 import { ANALYST_NAME, dayLabel, deviceLabel, flag, km, summaryTitle, timeLabel } from '../lib/format';
 import { patch, useStore, type QueueItem } from '../lib/store';
@@ -28,7 +28,7 @@ export function Library() {
           <span className="flex items-center gap-1 opacity-75"><Kbd>Ctrl</Kbd><Kbd>O</Kbd></span>
         </button>
       </div>
-      <Search />
+      <SearchBox />
       <List />
       <Footer />
     </aside>
@@ -63,7 +63,7 @@ function Rail() {
   );
 }
 
-function Search() {
+function SearchBox() {
   const search = useStore((s) => s.search);
   return (
     <div className="px-3 pb-3">
@@ -242,7 +242,7 @@ function PhotoRow({
           <div className="mt-1.5 flex items-center gap-1.5">
             {top && <ConfidencePill label={top.label} value={top.confidence} className="h-[20px] text-[11px]" />}
             {item.has_exif_gps && item.km_from_exif != null && (
-              <span className="text-[11px] text-fg-3 tnum" title="Distance from the photo's own GPS">{km(item.km_from_exif)} from GPS</span>
+              <span className="whitespace-nowrap text-[11px] text-fg-3 tnum" title="Distance from the photo's own GPS">{km(item.km_from_exif)} from GPS</span>
             )}
             <span className="ml-auto flex items-center gap-1">
               {item.analysts.map((p) => (
@@ -281,24 +281,12 @@ function ItemMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onC
   }, [onClose]);
   const left = Math.min(x, window.innerWidth - 200);
   const top = Math.min(y + 4, window.innerHeight - 110);
-  const name = useStore((s) => s.history?.find((h) => h.id === id)?.name ?? 'this photo');
   return (
     <div ref={ref} role="menu" style={{ left, top }} className="pop-in fixed z-40 w-[190px] rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow)]">
       <MenuItem icon={<RotateCw size={14} />} onClick={() => { onClose(); void reanalyse(id); }}>Re-analyse</MenuItem>
       <MenuItem icon={<Clock size={14} />} onClick={() => { onClose(); selectResult(id, true); }}>Show in inspector</MenuItem>
       <div className="my-1 h-px bg-border" />
-      <MenuItem danger icon={<Trash2 size={14} />} onClick={() => {
-        onClose();
-        patch({
-          confirm: {
-            title: 'Delete this photo?',
-            body: `“${name}” and its result are removed from this computer. This can't be undone.`,
-            confirmLabel: 'Delete',
-            danger: true,
-            onConfirm: () => void removeResult(id),
-          },
-        });
-      }}>Delete</MenuItem>
+      <MenuItem danger icon={<Trash2 size={14} />} onClick={() => { onClose(); askDelete(id); }}>Delete</MenuItem>
     </div>
   );
 }

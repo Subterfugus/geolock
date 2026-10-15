@@ -5,9 +5,11 @@ import { GeoMap, mapHandle } from '../lib/map/mapController';
 import { getState, patch, toast, useStore } from '../lib/store';
 import { selectGuess } from '../lib/controller';
 import type { MapStyleKind } from '../lib/types';
-import { cx, IconButton, Segmented } from './ui';
+import { IconButton, Segmented } from './ui';
 import { ATTRIBUTION } from '../lib/map/mapStyles';
 import { Welcome } from './Welcome';
+import { deviceLabel } from '../lib/format';
+import { Spinner } from './ui';
 
 const STYLE_OPTIONS: { value: MapStyleKind; label: ReactNode; title: string; disabled?: boolean }[] = [
   { value: 'offline', label: <span className="flex items-center gap-1.5"><Globe size={13} />Offline</span>, title: 'Works without internet' },
@@ -35,7 +37,7 @@ export function MapView({ dim = false }: { dim?: boolean }) {
         patch({ mapStyle: 'offline' });
         toast('error', "Couldn't load that map", 'Streets and Satellite need an internet connection. Showing the offline map.');
       },
-    });
+    }, { zoom: getState().status?.state === 'ready' ? 1.7 : 1.15 });
     mapHandle.current = map;
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(container);
@@ -74,9 +76,15 @@ export function MapView({ dim = false }: { dim?: boolean }) {
   }, [result, sel]);
 
   return (
-    <div className="relative h-full min-w-0 flex-1 overflow-hidden bg-bg" data-testid="map">
-      <div ref={el} className="absolute inset-0" aria-label="Map" role="region" />
-      {dim && <div className="pointer-events-none absolute inset-0" style={{ background: 'var(--scrim)' }} />}
+    <div className="absolute inset-0 overflow-hidden bg-bg" data-testid="map">
+      {/* MapLibre adds its own position:relative to this element, so it sits inside an absolute wrapper. */}
+      <div ref={el} className="h-full w-full" aria-label="Map" role="region" />
+      {dim && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 60% 55% at 50% 50%, rgb(0 0 0 / 0.15), var(--scrim) 85%)' }}
+        />
+      )}
 
       {!dim && (
         <>
@@ -103,9 +111,11 @@ export function MapView({ dim = false }: { dim?: boolean }) {
               options={STYLE_OPTIONS}
               onChange={(v) => patch({ mapStyle: v })}
             />
-            <div className={cx('flex items-center gap-1 px-1.5 text-[11px] text-fg-3', mapStyle === 'offline' && 'invisible')}>
-              <Wifi size={11} /> Needs internet
-            </div>
+            {mapStyle !== 'offline' && (
+              <div className="flex items-center gap-1 px-1.5 text-[11px] text-fg-3">
+                <Wifi size={11} /> Needs internet
+              </div>
+            )}
           </div>
 
           <div className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-[10.5px] text-fg-3">
@@ -114,7 +124,27 @@ export function MapView({ dim = false }: { dim?: boolean }) {
         </>
       )}
 
+      {!dim && <Banner />}
       {!dim && <Welcome />}
+    </div>
+  );
+}
+
+/** Top-centre notice: connection trouble, or models reloading after a settings change. */
+function Banner() {
+  const lost = useStore((s) => s.connectionLost);
+  const loading = useStore((s) => s.status?.state === 'loading');
+  const device = useStore((s) => s.status?.device ?? null);
+  if (!lost && !loading) return null;
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 fade-in">
+      <div className="glass flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px] text-fg-2">
+        {lost ? (
+          <><span className="h-2 w-2 rounded-full bg-danger" /> Lost contact with the engine. Reconnecting…</>
+        ) : (
+          <><Spinner size={13} className="text-accent" /> Loading models on {deviceLabel(device)}…</>
+        )}
+      </div>
     </div>
   );
 }

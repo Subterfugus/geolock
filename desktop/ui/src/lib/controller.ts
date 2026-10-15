@@ -438,3 +438,17 @@ export async function addPhotos(): Promise<void> {
     toast('error', "Couldn't open the photos", errorText(e));
   }
 }
+
+/** Asks before deleting one photo. Used by the menu, the inspector and the Delete key. */
+export function askDelete(id: string): void {
+  const name = getState().history?.find((h) => h.id === id)?.name ?? 'this photo';
+  patch({
+    confirm: {
+      title: 'Delete this photo?',
+      body: `“${name}” and its result are removed from this computer. This can't be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: () => void removeResult(id),
+    },
+  });
+}

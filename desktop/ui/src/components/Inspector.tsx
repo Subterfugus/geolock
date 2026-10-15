@@ -3,7 +3,7 @@ import {
   Plus, RefreshCw, RotateCw, ScanText, Trash2,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { askAnalyst, reanalyse, selectGuess, removeResult } from '../lib/controller';
+import { askAnalyst, askDelete, reanalyse, selectGuess } from '../lib/controller';
 import { assetUrl } from '../lib/backend';
 import { copyText, openExternal } from '../lib/shell';
 import { mapHandle } from '../lib/map/mapController';
@@ -44,18 +44,7 @@ function InspectorHeader({ name, created, hasId }: { name: string | null; create
       {hasId && id && (
         <>
           <IconButton label="Re-analyse" onClick={() => void reanalyse(id)}><RotateCw size={15} /></IconButton>
-          <IconButton
-            label="Delete photo"
-            onClick={() => patch({
-              confirm: {
-                title: 'Delete this photo?',
-                body: `“${name ?? 'This photo'}” and its result are removed from this computer. This can't be undone.`,
-                confirmLabel: 'Delete',
-                danger: true,
-                onConfirm: () => void removeResult(id),
-              },
-            })}
-          >
+          <IconButton label="Delete photo" onClick={() => askDelete(id)}>
             <Trash2 size={15} />
           </IconButton>
         </>
@@ -430,7 +419,7 @@ function SecondOpinion({ result }: { result: Result }) {
                 <span className="truncate">{busy ? `Asking ${ANALYST_NAME[p]}…` : done ? `Ask ${ANALYST_NAME[p]} again` : label}</span>
               </span>
               <span className="pl-[26px] text-[11px] text-fg-3">
-                {busy ? 'Usually 5–30 s' : available ? (st?.via ?? 'Your own login') : 'Not set up'}
+                {busy ? 'Usually 5–30 s' : available ? 'Uses your own login' : 'Not set up'}
               </span>
             </button>
           );
