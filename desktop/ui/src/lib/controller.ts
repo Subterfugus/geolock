@@ -560,9 +560,10 @@ export function exportResult(id: string, format: ExportFormat): Promise<void> {
     if (format === 'kml') return saveFile(`${base}.kml`, format, toKml([r], `GeoLock: ${r.name}`));
     const map = mapHandle.current;
     if (!map || getState().selectedId !== id) throw new Error('Open the photo on the map first.');
-    const top = r.guesses[getState().selectedGuess] ?? r.guesses[0];
+    const sel = r.guesses[getState().selectedGuess] ? getState().selectedGuess : 0;
+    const top = r.guesses[sel];
     const lines: string[] = [];
-    if (top) lines.push(`Best guess: ${guessTitle(top).main}${top.country ? `, ${top.country}` : ''} · ${pct(top.confidence)} · within ±${Math.round(top.radius_km)} km`);
+    if (top) lines.push(`${sel === 0 ? 'Best guess' : `Guess #${sel + 1}`}: ${guessTitle(top).main}${top.country ? `, ${top.country}` : ''} · ${pct(top.confidence)} · within ±${Math.round(top.radius_km)} km`);
     if (top?.km_from_exif != null) lines.push(`The photo's own GPS (★) is ${km(top.km_from_exif)} from this guess.`);
     const blob = await map.snapshot({ title: r.name, lines }, await loadImage(r.image_url));
     return saveFile(`${base}-map.png`, 'png', blob);
@@ -575,9 +576,15 @@ export function exportLibrary(format: Exclude<ExportFormat, 'png'>): Promise<voi
     const rows = visibleHistory(getState());
     if (!rows.length) throw new Error('There are no photos to export.');
     const results: Result[] = [];
+    const missing: string[] = [];
     for (const h of rows) {
       const r = getState().results[h.id] ?? (await getResult(h.id).catch(() => null));
       if (r) results.push(r);
+      else missing.push(h.name);
+    }
+    if (!results.length) throw new Error("None of the photos could be read from the library.");
+    if (missing.length) {
+      toast('error', `${plural(missing.length, 'photo')} left out of the export`, `Couldn't read ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}`);
     }
     const base = `geolock-${plural(results.length, 'photo').replace(' ', '-')}-${today()}`;
     if (format === 'json') return saveFile(`${base}.json`, format, toJson(results));
