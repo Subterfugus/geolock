@@ -1,6 +1,6 @@
 [package]
 name = "geolock-desktop"
-version = "0.4.0"
+version = "0.4.1"
 description = "GeoLock desktop shell"
 authors = ["GeoLock"]
 license = "MIT"

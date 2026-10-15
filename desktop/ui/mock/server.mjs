@@ -25,6 +25,7 @@ const S = {
   bench: null,
   settings: {
     device: 'AUTO', read_text: true, show_exif_gps: true, share_findings: true,
+    analyst_web_search: true,
     keep_history: true, theme: 'system', map_style: 'streets',
     claude_model: '', claude_effort: '', chatgpt_model: '', chatgpt_effort: '', settings_rev: 2,
   },

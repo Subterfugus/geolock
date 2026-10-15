@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geolock"
-version = "0.4.0"
+version = "0.4.1"
 description = "Offline photo geolocation with OpenVINO: map guesses, confidence and clues"
 readme = "README.md"
 requires-python = ">=3.10"

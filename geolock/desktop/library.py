@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "read_text": True,
     "show_exif_gps": True,
     "share_findings": True,
+    "analyst_web_search": True,  # Claude/ChatGPT may search the web to check sign text
     "keep_history": True,
     "theme": "system",
     "map_style": "streets",

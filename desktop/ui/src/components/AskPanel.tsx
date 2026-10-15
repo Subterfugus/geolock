@@ -129,7 +129,7 @@ export function AskPanel({ result }: { result: Result }) {
 const STEPS: { stage: AnalystLive['stage'] | 'merge'; label: (n: string) => string }[] = [
   { stage: 'preparing', label: () => 'Preparing the photo and sign close-ups' },
   { stage: 'starting', label: (n) => `Waiting for ${n} to start` },
-  { stage: 'thinking', label: (n) => `${n} is studying the photo` },
+  { stage: 'thinking', label: (n) => `${n} is studying the photo and checking online` },
   { stage: 'writing', label: () => 'Writing its answer' },
   { stage: 'merge', label: () => "Blending it with GeoLock's guess" },
 ];
@@ -199,6 +199,9 @@ function LiveProgress({ provider, resultId }: { provider: Provider; resultId: st
               </span>
               <span className="min-w-0">
                 {s.label(name)}
+                {active && s.stage === 'thinking' && (live?.searches ?? 0) > 0 && (
+                  <span className="text-fg-3"> · {live!.searches} {live!.searches === 1 ? 'search' : 'searches'}</span>
+                )}
                 {active && s.stage === 'thinking' && live?.note && (
                   <span className="mt-0.5 block truncate text-[11.5px] italic text-fg-3" title={live.note}>“{live.note}”</span>
                 )}
@@ -211,7 +214,7 @@ function LiveProgress({ provider, resultId }: { provider: Provider; resultId: st
         <div className="h-full bg-accent transition-[width] duration-500 ease-out" style={{ width: `${Math.min(96, 6 + step * 22 + (step === 2 ? Math.min(14, (live?.chars ?? 0) / 400) : 0))}%` }} />
       </div>
       <div className="mt-1 ml-[28px] flex justify-between text-[10.5px] text-fg-3">
-        <span>Usually 10 to 60 seconds; higher effort takes longer.</span>
+        <span>Usually under a minute or two; web searches and higher effort take longer.</span>
         {live && live.chars > 0 && <span className="mono shrink-0 whitespace-nowrap">{live.chars.toLocaleString()} chars</span>}
       </div>
     </div>
