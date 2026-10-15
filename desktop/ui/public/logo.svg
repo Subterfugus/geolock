@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <mask id="globe-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48">
+      <rect width="48" height="48" fill="#fff"/>
+      <g fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round">
+        <circle cx="24" cy="19" r="6.6"/>
+        <ellipse cx="24" cy="19" rx="2.9" ry="6.6"/>
+        <line x1="17.6" y1="19" x2="30.4" y2="19"/>
+      </g>
+    </mask>
+  </defs>
+  <path d="M24 46 L11.53 27.33 A15 15 0 1 1 36.47 27.33 Z" fill="#4f6ef7" mask="url(#globe-cut)"/>
+</svg>

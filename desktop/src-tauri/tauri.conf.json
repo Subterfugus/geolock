@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GeoLock",
+  "version": "0.2.0",
+  "identifier": "com.geolock.desktop",
+  "build": {
+    "frontendDist": "../ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "GeoLock",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 680,
+        "center": true,
+        "visible": false,
+        "backgroundColor": "#0b0d12",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "GeoLock",
+    "shortDescription": "Find where a photo was taken",
+    "longDescription": "GeoLock estimates where a photo was taken, on your computer, and keeps a library of your results.",
+    "copyright": "Copyright (c) 2026 Brady (Subterfugus)",
+    "category": "Utility",
+    "licenseFile": "../../LICENSE",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "startMenuFolder": "GeoLock",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}
