@@ -23,9 +23,20 @@ function Backend {
 
 Write-Host "Installing $Setup"
 Start-Process $Setup -ArgumentList "/S" -Wait
-$app = Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Filter "GeoLock.exe" -ErrorAction SilentlyContinue |
-  Select-Object -First 1
-if (-not $app) { throw "GeoLock.exe not found after install" }
+# The install folder comes from the uninstall entry the installer writes; fall back to
+# the usual per-user folders.
+$dirs = @()
+Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
+  ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like "GeoLock*" } |
+  ForEach-Object { Write-Host "uninstall entry: $($_.DisplayName) at $($_.InstallLocation)"; if ($_.InstallLocation) { $dirs += $_.InstallLocation.Trim('"') } }
+$dirs += "$env:LOCALAPPDATA\GeoLock", "$env:LOCALAPPDATA\Programs\GeoLock"
+$app = $dirs | Where-Object { Test-Path $_ } | ForEach-Object {
+    Get-ChildItem $_ -Filter "*.exe" -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -notmatch "uninstall|geolock-backend" } } | Select-Object -First 1
+if (-not $app) {
+  Get-ChildItem "$env:LOCALAPPDATA" -Directory | Format-Table Name, LastWriteTime
+  throw "the GeoLock app exe was not found after install (looked in: $($dirs -join ', '))"
+}
 Write-Host "Installed: $($app.FullName)"
 Get-ChildItem $app.DirectoryName | Format-Table Name, Length
 $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu" -Recurse -Filter "GeoLock*.lnk" -ErrorAction SilentlyContinue
