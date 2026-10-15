@@ -48,6 +48,14 @@ def main(argv=None):
     os.environ.setdefault("GEOLOCK_MODELS", str(data_dir / "models"))
 
     print(f"GeoLock backend {a.port}: starting", flush=True)
+    # Load the native libraries here, on the main thread, before any worker thread exists.
+    # Frozen on Windows, scipy's OpenBLAS DLL first loaded from the model-loading thread
+    # (after OpenVINO had started its thread pool) deadlocked in the loader (CI, 2026-10-15).
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
+    import numpy  # noqa: F401
+    import scipy.spatial  # noqa: F401
+    import shapely  # noqa: F401
+    import openvino  # noqa: F401
     import uvicorn
     from .server import Backend, create_app
     print(f"  imports done in {time.perf_counter() - t0:.1f}s", flush=True)
