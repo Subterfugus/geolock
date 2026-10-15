@@ -1,0 +1,38 @@
+name: Desktop shell
+
+# Quick compile check of the Tauri shell (Rust) on Windows for pull requests that change it,
+# so a Rust error shows up on the PR instead of in the hour-long build on main.
+
+on:
+  pull_request:
+    paths: ["desktop/src-tauri/**", ".github/workflows/shell.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: shell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/ui/package-lock.json
+      - name: Build the UI (the shell embeds it)
+        working-directory: desktop/ui
+        run: npm ci && npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: cargo check
+        working-directory: desktop/src-tauri
+        run: cargo check --locked

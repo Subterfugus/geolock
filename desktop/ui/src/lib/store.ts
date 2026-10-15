@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type {
   AnalystProgress, HistorySummary, MapStyleKind, ModelOptions, Provider, Result, Settings, SetupInfo, Status,
+  UpdateInfo,
 } from './types';
 
 export interface QueueItem {
@@ -73,6 +74,9 @@ export interface AppState {
   dropActive: boolean;
   toasts: Toast[];
   confirm: ConfirmRequest | null;
+  /** The newest release and its download; null until the first check. */
+  appUpdate: UpdateInfo | null;
+  updateOpen: boolean;
 }
 
 const narrow = typeof window !== 'undefined' && window.innerWidth < 1180;
@@ -112,6 +116,8 @@ let state: AppState = {
   dropActive: false,
   toasts: [],
   confirm: null,
+  appUpdate: null,
+  updateOpen: false,
 };
 
 const listeners = new Set<() => void>();

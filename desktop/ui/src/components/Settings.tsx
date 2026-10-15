@@ -1,6 +1,6 @@
-import { Check, Cpu, FolderOpen, Info, Keyboard, Library, Loader2, Map as MapIcon, MessageSquareText, Palette, RefreshCw, ScanText, Trash2 } from 'lucide-react';
+import { ArrowUpCircle, Check, Cpu, FolderOpen, Info, Keyboard, Library, Loader2, Map as MapIcon, MessageSquareText, Palette, RefreshCw, ScanText, Trash2 } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
-import { clearLibrary, recheckAnalysts, updateSettings } from '../lib/controller';
+import { checkForUpdates, clearLibrary, recheckAnalysts, updateSettings } from '../lib/controller';
 import { ANALYST_COMPANY, ANALYST_NAME, deviceLabel } from '../lib/format';
 import { revealDataFolder } from '../lib/shell';
 import { patch, useStore } from '../lib/store';
@@ -11,6 +11,7 @@ import { APP_VERSION } from '../version';
 import { DeviceDiagnostics } from './Diagnostics';
 import { ModelPickers, ProviderMark } from './AskPanel';
 import { SHORTCUTS } from './Overlays';
+import { hasUpdate } from './Update';
 import { Kbd } from './ui';
 
 const LABEL_ID = 'settings-title';
@@ -35,6 +36,7 @@ const NAV: { id: string; label: string; icon: ReactNode }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
   { id: 'library', label: 'Library', icon: <Library size={14} /> },
   { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard size={14} /> },
+  { id: 'updates', label: 'Updates', icon: <ArrowUpCircle size={14} /> },
   { id: 'about', label: 'About', icon: <Info size={14} /> },
 ];
 
@@ -222,6 +224,15 @@ function SettingsSections({ settings }: { settings: SettingsT }) {
         </ul>
       </Section>
 
+      <Section id="updates" title="Updates" hint="GeoLock looks for a new version when it starts and tells you. It downloads one only when you click Download.">
+        <UpdateRow />
+        <Row
+          label="Check for updates when GeoLock starts"
+          hint="Reads a small file from the GeoLock releases on GitHub. Nothing about you or your photos is sent."
+          control={<Switch label="Check for updates when GeoLock starts" checked={settings.check_updates ?? true} onChange={(v) => void updateSettings({ check_updates: v })} />}
+        />
+      </Section>
+
       <Section id="about" title="About">
         <div className="flex items-start gap-3">
           <Info size={15} className="mt-0.5 shrink-0 text-accent" />
@@ -235,6 +246,35 @@ function SettingsSections({ settings }: { settings: SettingsT }) {
         </div>
         {!isTauri() && <p className="text-[11.5px] text-fg-3">Running in a browser for development. Desktop features are off.</p>}
       </Section>
+    </div>
+  );
+}
+
+function UpdateRow() {
+  const u = useStore((s) => s.appUpdate);
+  const engine = useStore((s) => s.status?.version);
+  const version = u?.current || engine || APP_VERSION;
+  const checking = u?.state === 'checking';
+  let line = `You have GeoLock ${version}.`;
+  if (u && hasUpdate(u)) line += ` Version ${u.latest} is available.`;
+  else if (u?.state === 'up_to_date') line += ' It is the newest version.';
+  else if (u?.state === 'error' && u.error) line += ` ${u.error}`;
+  const when = u?.checked_at ? new Date(u.checked_at * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  return (
+    <div className="flex items-center justify-between gap-6">
+      <div className="min-w-0">
+        <div className="text-[13.5px]">{line}</div>
+        <div className="text-[12px] text-fg-3">{when ? `Last checked ${when}` : 'Not checked yet this session'}</div>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        {u && hasUpdate(u) ? (
+          <Button variant="primary" onClick={() => patch({ updateOpen: true, settingsOpen: false })}><ArrowUpCircle size={13} /> See update</Button>
+        ) : (
+          <Button variant="secondary" disabled={checking} onClick={() => void checkForUpdates()}>
+            {checking ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Check for updates
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

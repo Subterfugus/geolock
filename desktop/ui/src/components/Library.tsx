@@ -11,6 +11,7 @@ import { ANALYST_NAME, dayLabel, deviceLabel, flag, km, plural, summaryTitle, ti
 import { patch, useStore, type QueueItem } from '../lib/store';
 import type { HistorySummary, Provider } from '../lib/types';
 import { cx, ConfidencePill, IconButton, Kbd, LOGO_SRC, Spinner } from './ui';
+import { UpdateButton, hasUpdate } from './Update';
 
 const PROVIDER_CLASS: Record<Provider, string> = { claude: 'bg-claude', chatgpt: 'bg-chatgpt' };
 
@@ -71,6 +72,7 @@ function Rail() {
       <IconButton label="Add photos (Ctrl+O)" onClick={() => void addPhotos()}><FolderInput size={17} /></IconButton>
       <IconButton label="Add a folder of photos (Ctrl+Shift+O)" onClick={() => void addFolder()}><FolderOpen size={17} /></IconButton>
       <div className="mt-auto flex flex-col items-center gap-1">
+        <UpdateButton compact />
         <IconButton label="Keyboard shortcuts (?)" onClick={() => patch({ shortcutsOpen: true })}><Keyboard size={16} /></IconButton>
         <IconButton label="Settings (Ctrl+,)" onClick={() => patch({ settingsOpen: true })}><Settings size={17} /></IconButton>
       </div>
@@ -329,6 +331,7 @@ function MenuItem({ children, icon, onClick, danger }: { children: ReactNode; ic
 
 function Footer() {
   const device = useStore((s) => s.status?.device);
+  const updateOffered = useStore((s) => hasUpdate(s.appUpdate));
   const available = useStore((s) => s.status?.available_devices ?? []);
   return (
     <footer className="flex h-12 shrink-0 items-center justify-between gap-2 border-t border-border px-3">
@@ -342,7 +345,8 @@ function Footer() {
         <span className="truncate">{deviceLabel(device)}</span>
       </button>
       <div className="flex shrink-0 items-center gap-1">
-        <IconButton label="Keyboard shortcuts (?)" onClick={() => patch({ shortcutsOpen: true })}><Keyboard size={15} /></IconButton>
+        {/* The Update button takes the shortcuts button's place (shortcuts stay on ? and in Settings). */}
+        {updateOffered ? <UpdateButton /> : <IconButton label="Keyboard shortcuts (?)" onClick={() => patch({ shortcutsOpen: true })}><Keyboard size={15} /></IconButton>}
         <button
           type="button"
           onClick={() => patch({ settingsOpen: true })}

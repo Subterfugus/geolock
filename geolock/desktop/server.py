@@ -17,6 +17,7 @@ from .. import __version__
 from ..geodata import DATA
 from .library import Library, Settings, write_export
 from .modelsetup import ModelSetup, models_ready
+from .updater import Updater
 
 ORIGINS = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost",
            "http://localhost:1420", "http://127.0.0.1:1420"]
@@ -32,6 +33,7 @@ class Backend:
         self.settings = Settings(self.data_dir / "settings.json")
         self.library = Library(self.data_dir / "history")
         self.setup = ModelSetup(self.models_dir, on_ready=self.load_engine)
+        self.updater = Updater(self.data_dir)
         self.engine_factory = engine_factory or self._default_factory
         self.engine = None
         self.state = "needs_setup"
@@ -318,6 +320,27 @@ def create_app(backend, token=None):
         if values["device"] != before and models_ready(backend.models_dir):
             threading.Thread(target=backend._load_safely, daemon=True, name="engine-reload").start()
         return values
+
+    # ---------------------------------------------------------------- updates
+    @app.get("/api/update")
+    def update_report():
+        return backend.updater.report()
+
+    @app.post("/api/update/check")
+    def update_check():
+        """Read the newest release's latest.json (a few KB). Downloads nothing else."""
+        return backend.updater.check()
+
+    @app.post("/api/update/download")
+    def update_download():
+        try:
+            return backend.updater.start_download()
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+    @app.post("/api/update/cancel")
+    def update_cancel():
+        return backend.updater.cancel()
 
     # ------------------------------------------------------------ diagnostics
     @app.get("/api/diagnostics/benchmark")

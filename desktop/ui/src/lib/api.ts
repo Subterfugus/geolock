@@ -1,7 +1,7 @@
 import { apiRequest } from './backend';
 import type {
   Benchmark, HistorySummary, Provider, Result, Settings, SetupInfo, Status, AnalystStatus,
-  AnalystProgress, ModelOptions,
+  AnalystProgress, ModelOptions, UpdateInfo,
 } from './types';
 
 export const getStatus = () => apiRequest<Status>('GET', '/api/status');
@@ -24,6 +24,11 @@ export const stopAnalysts = () => apiRequest<{ stopped: number }>('POST', '/api/
 
 export const getBenchmark = () => apiRequest<Benchmark>('GET', '/api/diagnostics/benchmark');
 export const runBenchmark = () => apiRequest<Benchmark>('POST', '/api/diagnostics/benchmark');
+
+export const getUpdate = () => apiRequest<UpdateInfo>('GET', '/api/update');
+export const checkUpdate = () => apiRequest<UpdateInfo>('POST', '/api/update/check');
+export const downloadUpdate = () => apiRequest<UpdateInfo>('POST', '/api/update/download');
+export const cancelUpdate = () => apiRequest<UpdateInfo>('POST', '/api/update/cancel');
 
 export const getHistory = () => apiRequest<HistorySummary[]>('GET', '/api/history');
 export const getResult = (id: string) => apiRequest<Result>('GET', `/api/history/${encodeURIComponent(id)}`);

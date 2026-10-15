@@ -2,6 +2,7 @@
 //! and stops the backend when the app exits.
 
 mod backend;
+mod update;
 
 use std::time::Duration;
 
@@ -23,6 +24,21 @@ fn backend_info(state: State<'_, BackendState>) -> BackendInfo {
 #[tauri::command]
 fn backend_restart(state: State<'_, BackendState>) -> BackendInfo {
     state.restart()
+}
+
+/// Runs a downloaded update installer and closes the app so it can replace the files.
+/// The installer shows its progress and starts GeoLock again when it is done.
+#[tauri::command]
+fn install_update(app: AppHandle, state: State<'_, BackendState>, path: String) -> Result<(), String> {
+    let installer = update::checked_installer(&state.data_dir(), &path)?;
+    // Stop the backend first so the installer can replace its files.
+    state.stop();
+    if let Err(e) = update::launch(&installer) {
+        state.start();
+        return Err(e);
+    }
+    app.exit(0);
+    Ok(())
 }
 
 /// Brings the window to the front. Used when a second launch is attempted.
@@ -52,7 +68,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![backend_info, backend_restart])
+        .invoke_handler(tauri::generate_handler![backend_info, backend_restart, install_update])
         .on_page_load(|webview, payload| {
             // The window starts hidden so there is no blank white frame.
             if payload.event() == PageLoadEvent::Finished {

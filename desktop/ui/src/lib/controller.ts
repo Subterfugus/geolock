@@ -2,17 +2,18 @@
 // Components call these functions; they read state through the store.
 import {
   cancelSetup, clearHistory, deleteResult, getHistory, getResult, getSetup, getSettings, getStatus,
-  getAnalystModels, getAnalystProgress, stopAnalysts,
+  getAnalystModels, getAnalystProgress, stopAnalysts, cancelUpdate, checkUpdate, downloadUpdate, getUpdate,
   importModels, locatePhoto, putSettings, refreshAnalysts, rerunPhoto, startSetup, type LocateOptions,
 } from './api';
-import { ApiError, assetUrl, currentBackend, resolveBackend } from './backend';
+import { invoke } from '@tauri-apps/api/core';
+import { ApiError, assetUrl, currentBackend, isTauri, resolveBackend } from './backend';
 import { errorText, guessTitle, km, pct, plural } from './format';
 import { getState, patch, toast, update } from './store';
 import { applyTheme, watchSystemTheme } from './theme';
 import { pickPhotoFolder, pickPhotos } from './files';
 import { saveFile, stem, toCsv, toJson, toKml, type ExportFormat } from './exporter';
 import { mapHandle } from './map/mapController';
-import type { HistorySummary, Provider, Result, Settings, Status } from './types';
+import type { HistorySummary, Provider, Result, Settings, Status, UpdateInfo } from './types';
 import type { QueueItem } from './store';
 
 const BOOT_TIMEOUT_MS = 60_000;
@@ -38,6 +39,7 @@ async function statusLoop(): Promise<void> {
     const before = getState();
     const becameReady = status.state === 'ready' && before.status?.state !== 'ready';
     patch({ reachable: true, bootTimedOut: false, connectionLost: false, status });
+    void autoCheckUpdates();
     if (status.state === 'needs_setup' || status.state === 'setting_up') patch({ setupSeen: true });
     if (becameReady) {
       if (before.setupSeen) toast('success', 'GeoLock is ready', 'Drop a photo anywhere to locate it.');
@@ -647,4 +649,96 @@ export function askDelete(id: string): void {
       onConfirm: () => void removeResult(id),
     },
   });
+}
+
+// ------------------------------------------------------------------ updates
+
+let updatePoll: ReturnType<typeof setTimeout> | null = null;
+let autoChecked = false;
+
+/** Once per launch, when the backend first answers: look for a newer release (a few KB). */
+async function autoCheckUpdates(): Promise<void> {
+  if (autoChecked) return;
+  autoChecked = true;
+  try {
+    const settings = getState().settings ?? (await getSettings());
+    if (settings.check_updates === false) return;
+    const info = await checkUpdate();
+    patch({ appUpdate: info });
+    if (info.state === 'available' || info.state === 'ready') {
+      toast('info', `GeoLock ${info.latest} is available`, 'Click Update at the bottom left to see what is new.');
+    }
+  } catch {
+    /* offline or an old backend: the user can check from Settings */
+  }
+}
+
+/** Check now, from the Update dialog or Settings. Says the outcome either way. */
+export async function checkForUpdates(): Promise<void> {
+  patch({ appUpdate: { ...(getState().appUpdate ?? emptyUpdate()), state: 'checking', error: null } });
+  try {
+    const info = await checkUpdate();
+    patch({ appUpdate: info });
+    if (info.state === 'up_to_date') toast('success', "You're up to date", `GeoLock ${info.current} is the newest version.`);
+    else if (info.state === 'available' || info.state === 'ready') patch({ updateOpen: true, settingsOpen: false });
+  } catch (e) {
+    patch({ appUpdate: { ...(getState().appUpdate ?? emptyUpdate()), state: 'error', error: errorText(e) } });
+  }
+}
+
+function emptyUpdate(): UpdateInfo {
+  return {
+    state: 'idle', current: getState().status?.version ?? '', error: null, checked_at: null, latest: null,
+    notes: null, published_at: null, size_mb: null, free_disk_mb: null, progress: null, installer_path: null,
+    releases_url: 'https://github.com/Subterfugus/geolock/releases',
+  };
+}
+
+async function pollUpdate(): Promise<void> {
+  updatePoll = null;
+  try {
+    const info = await getUpdate();
+    patch({ appUpdate: info });
+    if (info.state === 'downloading') {
+      updatePoll = setTimeout(() => void pollUpdate(), 500);
+    } else if (info.state === 'ready') {
+      toast('success', 'Update downloaded', 'Install it now or the next time you open GeoLock.');
+    } else if (info.error) {
+      toast('error', "The update didn't download", info.error);
+    }
+  } catch {
+    updatePoll = setTimeout(() => void pollUpdate(), 1500);
+  }
+}
+
+export async function startUpdateDownload(): Promise<void> {
+  try {
+    patch({ appUpdate: await downloadUpdate() });
+    if (!updatePoll) void pollUpdate();
+  } catch (e) {
+    toast('error', "Couldn't start the download", errorText(e));
+  }
+}
+
+export async function cancelUpdateDownload(): Promise<void> {
+  try {
+    patch({ appUpdate: await cancelUpdate() });
+  } catch (e) {
+    toast('error', "Couldn't cancel", errorText(e));
+  }
+}
+
+/** Hands the checked installer to the shell, which closes GeoLock and runs it. */
+export async function installUpdate(): Promise<void> {
+  const path = getState().appUpdate?.installer_path;
+  if (!path) return;
+  if (!isTauri()) {
+    toast('info', 'Updates install from the desktop app', path);
+    return;
+  }
+  try {
+    await invoke('install_update', { path });
+  } catch (e) {
+    toast('error', "Couldn't start the installer", errorText(e));
+  }
 }

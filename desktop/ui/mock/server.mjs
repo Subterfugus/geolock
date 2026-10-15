@@ -27,7 +27,7 @@ const S = {
     device: 'AUTO', read_text: true, show_exif_gps: true, share_findings: true,
     analyst_web_search: true, osm_lookup: false,
     keep_history: true, theme: 'system', map_style: 'streets',
-    claude_model: '', claude_effort: '', chatgpt_model: '', chatgpt_effort: '', settings_rev: 2,
+    claude_model: '', claude_effort: '', chatgpt_model: '', chatgpt_effort: '', check_updates: true, settings_rev: 2,
   },
   analysts: {
     claude: { available: true, via: 'claude-code', detail: 'Claude Code, your Claude login' },
@@ -42,6 +42,28 @@ const S = {
   results: new Map(), // id -> Result
   images: new Map(),  // id -> { bytes, type }
 };
+
+// Update check (MOCK_UPDATE=1 offers a newer version; the download takes 8 s).
+const U = { state: 'idle', checkedAt: null, startedAt: 0 };
+const UPDATE_MB = 398;
+function updateInfo() {
+  let progress = null;
+  if (U.state === 'downloading') {
+    const f = Math.min(1, (Date.now() - U.startedAt) / 8000);
+    if (f >= 1) U.state = 'ready';
+    else progress = { fraction: f, done_mb: +(UPDATE_MB * f).toFixed(1), total_mb: UPDATE_MB, speed_mbps: 49.8, eta_s: Math.round((1 - f) * 8) };
+  }
+  const offered = U.state !== 'idle' && U.state !== 'up_to_date';
+  return {
+    state: U.state, current: '0.4.4', error: null, checked_at: U.checkedAt,
+    latest: offered ? '0.5.0' : null,
+    notes: offered ? '## GeoLock 0.5.0\n\n- **Faster first guess**: the map shows GeoLock\'s pick while text reading finishes.\n- Street names read from signs are matched against a local gazetteer.\n- Fixed the export button doing nothing for photos with no guesses.\n\nUpdating keeps your library, settings and models.' : null,
+    published_at: offered ? '2026-10-20T12:00:00Z' : null,
+    size_mb: offered ? UPDATE_MB : null, free_disk_mb: 212000, progress,
+    installer_path: U.state === 'ready' ? 'C:\\Users\\you\\AppData\\Local\\com.geolock.desktop\\updates\\GeoLock_0.5.0_x64-setup.exe' : null,
+    releases_url: 'https://github.com/Subterfugus/geolock/releases',
+  };
+}
 
 /** Advances the simulated setup; finishing it hands over to the model-loading phase. */
 function tick() {
@@ -111,7 +133,7 @@ function status() {
   return {
     state,
     error: state === 'error' ? 'The CLIP model failed to compile for the GPU. Details are in the log file.' : null,
-    version: '0.2.0',
+    version: '0.4.4',
     device: state === 'ready' || state === 'loading' ? diagnostics().device : null,
     device_name: NAMES[diagnostics().device],
     available_devices: ['CPU', 'GPU', 'NPU'],
@@ -596,6 +618,20 @@ async function route(req, res) {
       S.loadingUntil = now() + 2500;
     }
     return send(res, 200, S.settings);
+  }
+  if (p === '/api/update' && m === 'GET') return send(res, 200, updateInfo());
+  if (p === '/api/update/check' && m === 'POST') {
+    U.checkedAt = Date.now() / 1000;
+    if (U.state === 'idle' || U.state === 'up_to_date') U.state = process.env.MOCK_UPDATE ? 'available' : 'up_to_date';
+    return send(res, 200, updateInfo());
+  }
+  if (p === '/api/update/download' && m === 'POST') {
+    if (U.state === 'available') { U.state = 'downloading'; U.startedAt = Date.now(); }
+    return send(res, 200, updateInfo());
+  }
+  if (p === '/api/update/cancel' && m === 'POST') {
+    if (U.state === 'downloading') U.state = 'available';
+    return send(res, 200, updateInfo());
   }
   if (p === '/api/diagnostics/benchmark' && m === 'GET') return send(res, 200, S.bench ?? { rows: [], at: null });
   if (p === '/api/diagnostics/benchmark' && m === 'POST') {

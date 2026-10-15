@@ -41,7 +41,7 @@ is absent.
 {
   "state": "needs_setup",          // needs_setup | setting_up | loading | ready | error
   "error": null,                   // message when state == "error"
-  "version": "0.4.3",
+  "version": "0.4.4",
   "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
   "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
   "available_devices": ["CPU", "GPU", "NPU"],
@@ -281,12 +281,43 @@ browser dev mode the UI downloads the file instead and never calls this.
   "claude_effort": "",         // "" | minimal | low | medium | high | xhigh | max
   "chatgpt_model": "",
   "chatgpt_effort": "",
+  "check_updates": true,       // the UI calls POST /api/update/check once at startup
   "settings_rev": 2            // read-only; 0.3 settings with map_style "offline" are moved to "streets" once
 }
 ```
 There is deliberately **no** setting that asks Claude or ChatGPT automatically.
 
 ### `POST /api/analysts/refresh` → `{"claude": {...}, "chatgpt": {...}}` (re-checks logins)
+
+## Updates
+
+Each release carries `latest.json` next to the installer (written by CI with
+`tools/update_manifest.py`): version, notes (markdown), and the installer's name, GitHub
+URL, size and SHA-256. The backend reads it from the newest release
+(`https://github.com/Subterfugus/geolock/releases/latest/download/latest.json`).
+
+### `GET /api/update` → the current state; `POST /api/update/check` → checks, then the state
+```json
+{
+  "state": "available",        // idle | checking | up_to_date | available | downloading | ready | error
+  "current": "0.4.4", "latest": "0.5.0", "notes": "markdown", "published_at": "2026-10-20T12:00:00Z",
+  "size_mb": 398, "free_disk_mb": 212000,
+  "progress": null,            // while downloading: {fraction, done_mb, total_mb, speed_mbps, eta_s}
+  "installer_path": null,      // when ready: <data dir>\updates\GeoLock_0.5.0_x64-setup.exe
+  "error": null, "checked_at": 1760529600, "releases_url": "https://github.com/Subterfugus/geolock/releases"
+}
+```
+The check downloads only the manifest. A finished, checksum-verified download from an
+earlier run is found again (`ready`). Installers for this version or older are deleted at
+startup.
+
+### `POST /api/update/download` → starts (or resumes) the download; poll `GET /api/update`
+### `POST /api/update/cancel` → stops it; the partial file is kept for a resume
+
+Installing is the shell's job: the UI invokes `install_update {path}`. The shell accepts
+only a `*-setup.exe` directly in `<data dir>\updates`, stops the backend, runs the
+installer with `/P /UPDATE /R` (progress window, no questions, keeps shortcuts, starts
+GeoLock again) and exits.
 
 ## Static data
 `GET /data/countries.geojson` (242 countries; properties `iso2, name, continent, subregion,
