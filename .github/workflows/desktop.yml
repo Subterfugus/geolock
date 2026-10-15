@@ -109,6 +109,17 @@ jobs:
           name: installer-test-screenshots
           path: screenshots
           retention-days: 14
+      - name: Share the screenshots on the ci-screenshots branch
+        if: always() && hashFiles('screenshots/*.png') != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd screenshots
+          git init -q -b ci-screenshots
+          git -c user.name=github-actions -c user.email=actions@github.com add -A
+          git -c user.name=github-actions -c user.email=actions@github.com commit -qm "Installer test screenshots for ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-screenshots
       - uses: actions/upload-artifact@v4
         with:
           name: GeoLock-installer
