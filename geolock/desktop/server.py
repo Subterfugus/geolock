@@ -38,6 +38,9 @@ class Backend:
         self.error = None
         self.lock = threading.Lock()        # one analysis at a time
         self.load_lock = threading.Lock()
+        self.load_ms = None                 # model compile + warm-up, for diagnostics
+        self.last_benchmark = None
+        self.last_locate = None             # device and timings of the latest photo
 
     def _default_factory(self, device):
         from ..engine import Geolocator
@@ -60,10 +63,13 @@ class Backend:
             self.state = "loading"
             self.error = None
             try:
+                t0 = time.perf_counter()
                 eng = self.engine_factory(self.settings["device"])
                 eng.warmup()
                 with self.lock:
                     self.engine = eng
+                self.load_ms = round((time.perf_counter() - t0) * 1000)
+                self.last_benchmark = self.last_locate = None
                 self.state = "ready"
             except Exception as e:
                 self.engine = None
@@ -79,19 +85,28 @@ class Backend:
 
     def status(self):
         eng = self.engine
-        devices, name = [], None
+        diag = None
         if eng is not None:
-            devices = list(eng.core.available_devices)
-            try:
-                name = str(eng.core.get_property(eng.device, "FULL_DEVICE_NAME"))
-            except Exception:
-                name = None
+            devices = [d.split(".")[0] for d in eng.core.available_devices]
+            diag = dict(eng.runner.report(), warmup_ms=eng.warmup_ms, load_ms=self.load_ms,
+                        last_locate=self.last_locate)
         else:
             devices = _devices()
         return {"state": self.current_state(), "error": self.error, "version": __version__,
-                "device": eng.device if eng else None, "device_name": name,
-                "available_devices": devices, "analysts": _analysts_now(),
+                "device": eng.device if eng else None,
+                "device_name": diag["device_name"] if diag else None,
+                "available_devices": list(dict.fromkeys(devices)), "diagnostics": diag,
+                "analysts": _analysts_now(),
                 "data_dir": str(self.data_dir), "models_dir": str(self.models_dir)}
+
+    def benchmark(self, n=5):
+        eng = self.engine
+        if eng is None:
+            raise HTTPException(409, "The models are not loaded yet.")
+        with self.lock:  # not while a photo is being analysed
+            rows = eng.benchmark(n)
+        self.last_benchmark = {"rows": rows, "at": time.time()}
+        return self.last_benchmark
 
     # --------------------------------------------------------------- analysis
     def analyse(self, rid, name, created, photo, ocr, exif_gps, ask, share_local, prior=()):
@@ -106,6 +121,8 @@ class Backend:
                       options={"ocr": ocr, "exif_gps": exif_gps, "ask": list(ask),
                                "share_local": share_local})
         self.library.save(result, keep=self.settings["keep_history"])
+        self.last_locate = {"device": result.get("device"), "timings": result.get("timings"),
+                            "at": time.time()}
         return result
 
 
@@ -135,7 +152,7 @@ def _devices():
     if "v" not in _dev_cache:
         try:
             import openvino as ov
-            _dev_cache["v"] = list(ov.Core().available_devices)
+            _dev_cache["v"] = list(dict.fromkeys(d.split(".")[0] for d in ov.Core().available_devices))
         except Exception:
             _dev_cache["v"] = ["CPU"]
     return _dev_cache["v"]
@@ -294,6 +311,16 @@ def create_app(backend, token=None):
         if values["device"] != before and models_ready(backend.models_dir):
             threading.Thread(target=backend._load_safely, daemon=True, name="engine-reload").start()
         return values
+
+    # ------------------------------------------------------------ diagnostics
+    @app.get("/api/diagnostics/benchmark")
+    def benchmark_last():
+        return backend.last_benchmark or {"rows": [], "at": None}
+
+    @app.post("/api/diagnostics/benchmark")
+    def benchmark_run():
+        """Time CLIP on every device (GPU, NPU, CPU). Takes a few seconds to a minute."""
+        return backend.benchmark()
 
     @app.post("/api/analysts/refresh")
     def analysts_refresh():

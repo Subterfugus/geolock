@@ -7,6 +7,7 @@ import type { MapStyleKind, Provider, Settings as SettingsT, ThemeMode } from '.
 import { Button, Dialog, Segmented, Switch, cx } from './ui';
 import { isTauri } from '../lib/backend';
 import { APP_VERSION } from '../version';
+import { DeviceDiagnostics } from './Diagnostics';
 
 const LABEL_ID = 'settings-title';
 
@@ -65,13 +66,15 @@ function SettingsBody({ settings }: { settings: SettingsT }) {
             title: d === 'GPU' ? 'Intel Arc GPU' : d === 'NPU' ? 'Neural processing unit' : d === 'CPU' ? 'Processor cores' : 'Choose the fastest available',
           }))}
         />
-        <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
-          {reloading ? (
-            <><Loader2 size={13} className="animate-spin-slow" /> Reloading models…</>
-          ) : (
-            <>Running on {deviceLabel(status?.device)}{status?.device_name ? ` · ${status.device_name}` : ''}</>
-          )}
-        </div>
+        {reloading || !status?.diagnostics ? (
+          <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
+            {reloading ? (
+              <><Loader2 size={13} className="animate-spin-slow" /> Reloading models…</>
+            ) : (
+              <>Running on {deviceLabel(status?.device)}{status?.device_name ? ` · ${status.device_name}` : ''}</>
+            )}
+          </div>
+        ) : <DeviceDiagnostics />}
       </Section>
 
       <Section title="Analysis defaults">

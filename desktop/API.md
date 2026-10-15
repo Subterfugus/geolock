@@ -45,6 +45,18 @@ is absent.
   "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
   "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
   "available_devices": ["CPU", "GPU", "NPU"],
+  "diagnostics": {                 // null until the models are loaded
+    "requested": "AUTO",           // the device setting
+    "device": "GPU", "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
+    "compile_ms": 4200,            // preparing CLIP for the device
+    "first_run_ms": 1900,          // first photo (one-off kernel set-up)
+    "last_run_ms": 190,            // CLIP on the latest photo
+    "runs": 3, "warmup_ms": 3100,
+    "load_ms": 7400,               // compile + warm-up, until ready
+    "last_locate": {"device": "GPU", "timings": {"clip_ms": 190, "total_ms": 1100}, "at": 1760000000.0},
+    "fallback": null,              // one sentence when a device failed and GeoLock fell back
+    "attempts": [{"device": "GPU", "step": "compile", "ok": true, "ms": 4200, "error": null}]
+  },
   "analysts": {
     "claude":  {"available": true,  "via": "claude-code", "detail": "Claude Code, your Claude login"},
     "chatgpt": {"available": false, "via": null, "detail": "Install the Codex CLI and sign in (codex login) to use your ChatGPT plan."}
@@ -55,6 +67,21 @@ is absent.
 ```
 `loading` = models are on disk and being compiled for the device (10-60 s on first start,
 a few seconds after that thanks to the OpenVINO cache).
+
+If the chosen device fails to compile, fails while running, or returns NaN/infinity, CLIP
+moves to the next device (Auto: GPU → NPU → CPU; a fixed choice: that device → CPU) and
+the photo carries on; `diagnostics.fallback` says what happened.
+
+### `POST /api/diagnostics/benchmark` → speed test, `GET` → the last one (`rows: []` if none)
+Compiles CLIP on every device and times it (median of 5 runs). Waits for any running
+analysis. Can take up to a minute the first time (NPU compilation).
+```json
+{"at": 1760000000.0, "rows": [
+  {"device": "GPU", "name": "Intel(R) Arc(TM) 140V GPU (16GB)", "ok": true,
+   "compile_ms": 3900, "first_run_ms": 1700, "ms": 185, "error": null},
+  {"device": "NPU", "name": "Intel(R) AI Boost", "ok": false, "compile_ms": null,
+   "first_run_ms": null, "ms": null, "error": "RuntimeError: [NPU] driver not found"}]}
+```
 
 ### `GET /api/setup`
 ```json

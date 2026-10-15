@@ -103,6 +103,32 @@ def run_save(port, folder):
     print(f"save: wrote {res['bytes']} bytes to {target.name}, refused .exe", flush=True)
 
 
+def run_devices(port):
+    """Diagnostics, the speed test, and the CPU fallback when the chosen device is missing
+    (the CI runner has no NPU, so choosing it must fall back to the CPU and say so)."""
+    d = call(port, "/api/status")["diagnostics"]
+    print(f"diagnostics: on {d['device']} ({d['device_name']}), compile {d['compile_ms']} ms, "
+          f"first run {d['first_run_ms']} ms, ready after {d['load_ms']} ms, last photo {d['last_locate']}", flush=True)
+    assert d["device"] and d["fallback"] is None and d["last_locate"]["timings"]["total_ms"] > 0
+    t = time.time()
+    rows = call(port, "/api/diagnostics/benchmark", "POST", b"")["rows"]
+    print(f"speed test ({time.time() - t:.0f}s):", flush=True)
+    for r in rows:
+        print(f"  {r['device']}: {r['ms']} ms per photo, compile {r['compile_ms']} ms, {r['error'] or 'ok'}", flush=True)
+    assert any(r["device"] == "CPU" and r["ok"] for r in rows)
+    call(port, "/api/settings", "PUT", json.dumps({"device": "NPU"}).encode(), "application/json")
+    t = time.time()
+    while (st := call(port, "/api/status", timeout=10))["state"] != "ready" or not st["diagnostics"] \
+            or st["diagnostics"]["requested"] != "NPU":
+        assert st["state"] != "error", st["error"]
+        assert time.time() - t < 300, "reload timed out"
+        time.sleep(0.5)
+    d = st["diagnostics"]
+    print(f"asked for NPU: running on {d['device']}; fallback: {d['fallback']}", flush=True)
+    assert d["device"] == "CPU" and "NPU" in d["fallback"]
+    run_locate(port)
+
+
 def wait_up(port, timeout=300):
     t0 = time.time()
     while True:
@@ -152,6 +178,7 @@ def main():
         run_setup(port)
         run_locate(port)
         run_save(port, data_dir)
+        run_devices(port)
         ok = True
     finally:
         proc.stdin.close()  # what happens when the app quits or crashes

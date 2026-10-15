@@ -22,6 +22,7 @@ const S = {
   setupError: process.env.MOCK_STATE === 'error' ? 'Could not start the model: out of memory while compiling for the GPU.' : null,
   loadingUntil: process.env.MOCK_STATE === 'loading' ? now() + 6000 : 0,
   device: 'GPU',
+  bench: null,
   settings: {
     device: 'AUTO', read_text: true, show_exif_gps: true, share_findings: true,
     keep_history: true, theme: 'system', map_style: 'offline',
@@ -104,12 +105,30 @@ function status() {
     state,
     error: state === 'error' ? 'The CLIP model failed to compile for the GPU. Details are in the log file.' : null,
     version: '0.2.0',
-    device: state === 'ready' || state === 'loading' ? S.device : null,
-    device_name: 'Intel(R) Arc(TM) 140V GPU (16GB)',
+    device: state === 'ready' || state === 'loading' ? diagnostics().device : null,
+    device_name: NAMES[diagnostics().device],
     available_devices: ['CPU', 'GPU', 'NPU'],
+    diagnostics: state === 'ready' ? diagnostics() : null,
     analysts: S.analysts,
     data_dir: 'C:\\Users\\Brady\\AppData\\Local\\com.geolock.desktop',
     models_dir: 'C:\\Users\\Brady\\AppData\\Local\\com.geolock.desktop\\models',
+  };
+}
+
+const NAMES = { GPU: 'Intel(R) Arc(TM) 140V GPU (16GB)', NPU: 'Intel(R) AI Boost', CPU: 'Intel(R) Core(TM) Ultra 7 258V' };
+
+/** MOCK_FALLBACK=1 pretends the NPU fails to compile, to show the fallback notice. */
+function diagnostics() {
+  const fell = process.env.MOCK_FALLBACK && S.settings.device === 'NPU';
+  const device = fell ? 'CPU' : S.device;
+  const last = S.history.length ? S.results.get(S.history[0]) : null;
+  return {
+    requested: S.settings.device, device, device_name: NAMES[device],
+    compile_ms: device === 'GPU' ? 4200 : 1300, first_run_ms: device === 'GPU' ? 1900 : 520,
+    last_run_ms: device === 'GPU' ? 190 : 640, runs: 3, warmup_ms: 3100, load_ms: 7400,
+    last_locate: last ? { device: last.device, timings: last.timings, at: Date.now() / 1000 } : null,
+    fallback: fell ? 'NPU couldn\'t start (RuntimeError: [NPU] Level0 driver not found), so GeoLock is using the CPU.' : null,
+    attempts: [],
   };
 }
 
@@ -521,6 +540,18 @@ async function route(req, res) {
       S.loadingUntil = now() + 2500;
     }
     return send(res, 200, S.settings);
+  }
+  if (p === '/api/diagnostics/benchmark' && m === 'GET') return send(res, 200, S.bench ?? { rows: [], at: null });
+  if (p === '/api/diagnostics/benchmark' && m === 'POST') {
+    await sleep(1800);
+    S.bench = { at: Date.now() / 1000, rows: [
+      { device: 'GPU', name: NAMES.GPU, ok: true, compile_ms: 3900, first_run_ms: 1700, ms: 185, error: null },
+      process.env.MOCK_FALLBACK
+        ? { device: 'NPU', name: NAMES.NPU, ok: false, compile_ms: null, first_run_ms: null, ms: null, error: 'RuntimeError: [NPU] Level0 driver not found' }
+        : { device: 'NPU', name: NAMES.NPU, ok: true, compile_ms: 21000, first_run_ms: 410, ms: 330, error: null },
+      { device: 'CPU', name: NAMES.CPU, ok: true, compile_ms: 1200, first_run_ms: 700, ms: 640, error: null },
+    ] };
+    return send(res, 200, S.bench);
   }
   if (p === '/api/analysts/refresh' && m === 'POST') {
     await sleep(600);
