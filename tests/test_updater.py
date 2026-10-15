@@ -24,6 +24,7 @@ def feed(tmp_path, monkeypatch):
     class Handler(http.server.SimpleHTTPRequestHandler):
         hits = []
         manifest = None
+        stall = False  # send 100 KB, then hang like a stuck server
 
         def log_message(self, *a):
             pass
@@ -42,6 +43,11 @@ def feed(tmp_path, monkeypatch):
             self.send_response(206 if rng else 200)
             self.send_header("Content-Length", str(len(data) - start))
             self.end_headers()
+            if Handler.stall:
+                self.wfile.write(data[start:start + 100_000])
+                self.wfile.flush()
+                time.sleep(20)
+                return
             self.wfile.write(data[start:])
 
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(site)))
@@ -129,6 +135,20 @@ def test_resume_and_bad_checksum(tmp_path, feed):
     rep = u.report()
     assert rep["state"] == "available" and "checksum" in rep["error"]
     assert not (tmp_path / "updates" / "GeoLock_9.9.1_x64-setup.exe").exists()
+
+
+def test_cancel_a_stalled_download(tmp_path, feed):
+    url, handler, _ = feed
+    handler.stall = True
+    u = up.Updater(tmp_path, feed_url=url, current="0.4.1")
+    u.check()
+    u.start_download()
+    wait(lambda: (u.progress or {}).get("done_mb", 0) > 0)
+    t = time.time()
+    assert u.cancel()["state"] == "available" and time.time() - t < 3
+    wait(lambda: not u.thread.is_alive(), timeout=5)
+    assert u.state == "available" and u.error is None
+    assert (tmp_path / "updates" / "GeoLock_9.9.0_x64-setup.exe.part").exists()  # kept to resume
 
 
 def test_unreachable_feed_is_a_friendly_error(tmp_path):

@@ -93,6 +93,7 @@ class Updater:
         self.progress = None
         self.path = None
         self.thread = None
+        self._resp = None  # the open download response, so cancel() can close it
         self.cancel_flag = threading.Event()
         self._clean_old()
 
@@ -152,7 +153,7 @@ class Updater:
     # ---------------------------------------------------------------- download
     def start_download(self):
         with self.lock:
-            if self.state == "downloading" or self.state == "ready":
+            if self.state in ("downloading", "ready") or (self.thread and self.thread.is_alive()):
                 return self.report()
             if self.manifest is None:
                 raise ValueError("Check for updates first.")
@@ -166,8 +167,12 @@ class Updater:
 
     def cancel(self):
         self.cancel_flag.set()
+        _abort(self._resp)  # unblocks a read that is waiting on a stalled server
         if self.thread is not None:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
+        with self.lock:
+            if self.state == "downloading":  # the thread notices soon; Cancel shows now
+                self.state, self.progress = "available", None
         return self.report()
 
     def _total_mb(self):
@@ -210,14 +215,20 @@ class Updater:
         if have:
             req.add_header("Range", f"bytes={have}-")
         t0, done0 = time.time(), have
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            self._resp = r
             if have and r.status != 206:  # the server ignored the range: start over
                 have = done0 = 0
             with open(part, "ab" if have else "wb") as f:
                 while True:
                     if self.cancel_flag.is_set():
                         raise Cancelled()
-                    chunk = r.read(1 << 20)
+                    try:
+                        chunk = r.read(1 << 16)
+                    except Exception:
+                        if self.cancel_flag.is_set():
+                            raise Cancelled()
+                        raise
                     if not chunk:
                         break
                     f.write(chunk)
@@ -227,6 +238,9 @@ class Updater:
                         "fraction": min(have / total, 1.0), "done_mb": round(have / 1e6, 1),
                         "total_mb": round(total / 1e6, 1), "speed_mbps": round(speed / 1e6, 2),
                         "eta_s": round((total - have) / speed) if speed > 0 else None}
+        self._resp = None
+        if self.cancel_flag.is_set():
+            raise Cancelled()
         if have < total:
             raise RuntimeError(f"The download stopped early ({have / 1e6:.0f} of {total / 1e6:.0f} MB). Try again to resume it.")
 
@@ -242,6 +256,21 @@ class Updater:
                     p.unlink()
             except (OSError, ValueError):
                 pass
+
+
+def _abort(resp):
+    """Shut the response's socket so a read blocked in another thread returns now."""
+    if resp is None:
+        return
+    try:
+        import socket
+        resp.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        resp.close()
+    except Exception:
+        pass
 
 
 def sha256(path):
