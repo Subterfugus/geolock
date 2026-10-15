@@ -536,6 +536,20 @@ about real-photo accuracy yet.
 
 ## Changelog
 
+- **2026-10-15 (stopped, not shipped)**: Getting the Settings version-label fix (PR #26) to
+  Brady through the in-app Update button. The 0.5.0 installer on GitHub was still building
+  (it publishes v0.5.0 with `latest.json`), and the app only offers versions newer than the
+  installed one, so the fix needs a 0.5.1 version bump: PR #27 (version files and release
+  notes only) was opened, then closed unmerged at Brady's request. Also stopped: small
+  "patch" updates (a few-MB NSIS patch replacing only changed files, offered when the
+  install matches the base release's file list); nothing of it was committed. To resume:
+  reopen or redo the 0.5.1 bump, build the installer on the Yoga (its auto-mode permission
+  check blocked `npm run tauri build` there; Brady must allow it or run it), publish with
+  `gh release create v0.5.1 <setup.exe> latest.json` (`gh` is logged in on the Yoga; make
+  latest.json with `tools/update_manifest.py`), and cancel or out-wait the CI runs so an
+  older release doesn't become "latest". Note: the Yoga install has no
+  `HKCU\...\Uninstall\GeoLock` registry key, so it may not appear in Windows "Installed apps".
+
 - **2026-10-15**: Version 0.5.0, the accuracy batch (Brady's picks from the idea lists).
   Licence plates and postcodes (`geolock/addresses.py`; GeoNames postcode list built by
   `tools/build_postcodes.py`, bundled as postcodes.npz, 887k postcodes, 9.6 MB). Zoomed
