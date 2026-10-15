@@ -14,9 +14,11 @@ on:
     paths-ignore: ["info.md", "README.md", "docs/**"]
   workflow_dispatch:
 
+# A newer push to a PR cancels its older build; builds of main always finish, because
+# each one publishes the release.
 concurrency:
   group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
