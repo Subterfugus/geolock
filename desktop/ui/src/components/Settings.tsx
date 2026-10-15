@@ -135,6 +135,11 @@ function SettingsSections({ settings }: { settings: SettingsT }) {
 
       <Section id="analysis" title="Analysis" hint="What GeoLock looks at on every photo. Changes apply to the next photo or re-analysis.">
         <Row label="Read text in photos" hint="Signs, shop names and street labels are strong clues." control={<Switch label="Read text in photos" checked={settings.read_text} onChange={(v) => void updateSettings({ read_text: v })} />} />
+        <Row
+          label="Look up sign text on OpenStreetMap"
+          hint="Shop and street names GeoLock reads are searched on OpenStreetMap, which can pin a photo to one town. Sends the text only, never the photo. Needs internet; adds a few seconds."
+          control={<Switch label="Look up sign text on OpenStreetMap" checked={settings.osm_lookup ?? false} onChange={(v) => void updateSettings({ osm_lookup: v })} />}
+        />
         <Row label="Show the photo's own GPS" hint="If the photo has a location tag, it is shown on the map for comparison. It is never used for the guess." control={<Switch label="Show the photo's own GPS" checked={settings.show_exif_gps} onChange={(v) => void updateSettings({ show_exif_gps: v })} />} />
       </Section>
 

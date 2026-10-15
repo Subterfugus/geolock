@@ -105,6 +105,8 @@ export interface Settings {
   share_findings: boolean;
   /** Claude/ChatGPT may search the web to check sign text and candidate places. */
   analyst_web_search: boolean;
+  /** Look up text read in the photo on OpenStreetMap (sends the text, never the photo). */
+  osm_lookup: boolean;
   keep_history: boolean;
   theme: ThemeMode;
   map_style: MapStyleKind;
@@ -189,7 +191,7 @@ export interface CountryOdds {
 
 export type ClueKind =
   | 'ocr' | 'language' | 'script' | 'domain' | 'phone' | 'currency' | 'units'
-  | 'scene' | 'timezone' | 'exif' | 'claude' | 'chatgpt' | 'vlm';
+  | 'scene' | 'timezone' | 'exif' | 'claude' | 'chatgpt' | 'vlm' | 'osm' | 'sun';
 
 export interface Clue {
   kind: ClueKind | string;

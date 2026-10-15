@@ -505,3 +505,24 @@ def test_country_odds_reshape_the_unpinned_probability(tiny_engine):
     assert shaped[eng.gal_country == de].sum() == pytest.approx(0.6, abs=0.01)
     assert shaped[eng.gal_country == at].sum() == pytest.approx(0.1, abs=0.01)
     assert np.allclose(eng._odds_shape(post, {}), post)
+
+
+def test_osm_lookup_pulls_the_guess_to_the_place_found(tiny_engine, monkeypatch):
+    from geolock import osm
+    from geolock.geodata import haversine_km
+    eng = tiny_engine
+    real = eng.evidence
+
+    def with_text(*a, **k):
+        ev = real(*a, **k)
+        ev["ocr"] = [{"text": "Bäckerei Schmitz", "score": 0.95, "box": [[0, 0], [9, 0], [9, 4], [0, 4]]}]
+        return ev
+    monkeypatch.setattr(eng, "evidence", with_text)
+    monkeypatch.setattr(osm, "search", lambda text, countries=(), opener=None: [(50.94, 6.96, "Bäckerei, Köln, Deutschland")])
+    img = Image.new("RGB", (640, 480), (90, 130, 170))
+    r = eng.locate(img, use_ocr=False, osm=True)
+    assert "osm_ms" in r["timings"] and any(c["kind"] == "osm" for c in r["clues"])
+    off = eng.locate(img, use_ocr=False)
+    d_on = haversine_km(r["guesses"][0]["lat"], r["guesses"][0]["lon"], 50.94, 6.96)
+    d_off = haversine_km(off["guesses"][0]["lat"], off["guesses"][0]["lon"], 50.94, 6.96)
+    assert d_on <= d_off and not any(c["kind"] == "osm" for c in off["clues"])
