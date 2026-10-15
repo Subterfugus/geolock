@@ -244,6 +244,15 @@ class Geolocator:
             timings["ocr_ms"] = round((time.perf_counter() - t) * 1000)
 
         clues += exif_clues(meta)
+        try:  # daylight at the photo's exact time (needs the EXIF clock and offset)
+            from .sun import daylight_clue
+            opts = prompts.ATTRIBUTES["setting"]["options"]
+            indoors = opts[int(attrs["setting"].argmax())]["label"] == "indoors"
+            sun = daylight_clue(im, meta, indoors=indoors)
+            if sun:
+                clues.append(sun)
+        except Exception:
+            pass
 
         # optional vision-language model
         vlm_raw = None
@@ -364,17 +373,28 @@ class Geolocator:
 
     def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
                keep_evidence=False, ask=(), share_local=True, prior_analysts=(),
-               analyst_options=None):
+               analyst_options=None, osm=False):
         """ask: analysts to consult ("claude", "chatgpt"); see geolock/analyst.py.
         analyst_options: {"claude": {"model": "opus", "effort": "high"}, ...}
         prior_analysts: answers from an earlier run, reused as they are (the desktop app
-        keeps them when a photo is re-analysed, so the user's plan isn't asked twice)."""
+        keeps them when a photo is re-analysed, so the user's plan isn't asked twice).
+        osm: look up the text read in the photo on OpenStreetMap (geolock/osm.py); sends
+        that text, never the photo."""
         t0 = time.perf_counter()
         timings = {}
         im, meta = self.open_image(image)
         codes = self.geo.country_codes
         n_c = len(codes)
         ev = self.evidence(im, meta, use_ocr, use_vlm, timings)
+        if osm and ev["ocr"]:
+            from .osm import osm_clues
+            t = time.perf_counter()
+            log_post, _, _ = self.posterior(ev["q"], ev["p_country_clip"], ev["clues"])
+            mass = np.bincount(np.where(self.gal_country >= 0, self.gal_country, n_c),
+                               weights=np.exp(log_post), minlength=n_c + 1)[:n_c]
+            top = [codes[i] for i in np.argsort(-mass)[:5] if mass[i] > 0.01]
+            ev["clues"] += osm_clues(ev["ocr"], top)
+            timings["osm_ms"] = round((time.perf_counter() - t) * 1000)
         analysts = [a for a in prior_analysts if a.get("provider") not in ask]
         if ask or analysts:
             from .analyst import analyst_clues, ask_all, snap_guesses

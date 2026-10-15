@@ -34,7 +34,7 @@ def cmd_locate(a):
     eng = _engine(a)
     for path in a.images:
         r = eng.locate(path, use_ocr=not a.no_ocr, use_vlm=a.vlm, ask=a.ask or (),
-                       share_local=not a.no_share_local)
+                       share_local=not a.no_share_local, osm=a.osm)
         if a.json:
             r.pop("heat", None)
             print(json.dumps(r, indent=2, ensure_ascii=False))
@@ -103,7 +103,7 @@ def cmd_eval(a):
         if not truth:
             continue
         r = eng.locate(im, use_ocr=not a.no_ocr, use_vlm=a.vlm, use_exif_gps=False, keep_evidence=a.fit,
-                       ask=a.ask or (), share_local=not a.no_share_local)
+                       ask=a.ask or (), share_local=not a.no_share_local, osm=a.osm)
         g = r["guesses"][0]
         e = float(haversine_km(g["lat"], g["lon"], truth["lat"], truth["lon"]))
         for an in r.get("analysts", []):
@@ -216,6 +216,8 @@ def _ask_args(s):
                         "sends the photo without its metadata)")
     s.add_argument("--no-share-local", action="store_true",
                    help="don't tell the analyst what GeoLock found (blind second opinion)")
+    s.add_argument("--osm", action="store_true",
+                   help="look up text read in the photo on OpenStreetMap (sends the text only)")
 
 
 def main(argv=None):

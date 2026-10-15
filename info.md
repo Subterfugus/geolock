@@ -485,6 +485,19 @@ about real-photo accuracy yet.
 
 ## Changelog
 
+- **2026-10-15**: Version 0.4.3, ideas 2 and 6 of the accuracy list. (2) Optional
+  OpenStreetMap lookup of sign text (`geolock/osm.py`, setting `osm_lookup`, off by default,
+  CLI `--osm`): up to 3 confident, non-generic OCR lines are searched on Nominatim, first in
+  GeoLock's top 5 countries, then worldwide; 1-8 distinct hits become a point clue (20 km
+  bumps, strength 0.85 for one place down to 0.45 for many); more hits = too common, dropped.
+  Sends only the text and country codes, 1 request/s, GeoLock User-Agent. (6) Daylight clue
+  (`geolock/sun.py`): with EXIF DateTimeOriginal + OffsetTimeOriginal, the top 40% of the
+  photo is classed day / night / unsure by brightness; points where the sun was then down
+  (or up) are down-weighted (strength 0.6). Skipped indoors, at twilight, and when it would
+  say the same for the whole time zone. Shadow direction was not built: it needs the
+  camera's compass heading, which photos without GPS almost never have. Tested with a fake
+  Nominatim and synthetic photos; neither is measured on real photos yet.
+
 - **2026-10-15**: Version 0.4.2, sharper second opinion (Brady picked ideas 1, 4 and 5 of
   the accuracy list). (1) Analyst guesses are snapped onto the town they name, looked up
   in the cities1000 list shipped with reverse_geocoder (`GeoData.find_town`, matched per

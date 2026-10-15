@@ -416,15 +416,15 @@ function Countries({ result, guess }: { result: Result; guess: Guess }) {
 // ---------------------------------------------------------------- clues
 
 const CLUE_GROUPS: { title: string; kinds: string[] }[] = [
-  { title: 'Text & language', kinds: ['ocr', 'language', 'script', 'domain', 'phone', 'currency', 'units'] },
+  { title: 'Text & language', kinds: ['ocr', 'language', 'script', 'domain', 'phone', 'currency', 'units', 'osm'] },
   { title: 'Scene', kinds: ['scene', 'vlm'] },
-  { title: 'Camera & time', kinds: ['exif', 'timezone'] },
+  { title: 'Camera & time', kinds: ['exif', 'timezone', 'sun'] },
   { title: 'Second opinions', kinds: ['claude', 'chatgpt'] },
 ];
 
 const KIND_LABEL: Record<string, string> = {
   ocr: 'Text', language: 'Language', script: 'Script', domain: 'Website', phone: 'Phone', currency: 'Currency',
-  units: 'Units', scene: 'Scene', vlm: 'Vision model', timezone: 'Time zone', exif: 'Camera', claude: 'Claude', chatgpt: 'ChatGPT',
+  units: 'Units', scene: 'Scene', vlm: 'Vision model', timezone: 'Time zone', sun: 'Daylight', osm: 'OpenStreetMap', exif: 'Camera', claude: 'Claude', chatgpt: 'ChatGPT',
 };
 
 function Clues({ result }: { result: Result }) {

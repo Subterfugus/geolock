@@ -122,7 +122,7 @@ class Backend:
         with self.lock:
             result = eng.locate(photo, use_ocr=ocr, use_exif_gps=exif_gps, ask=ask,
                                 share_local=share_local, prior_analysts=prior,
-                                analyst_options=opts)
+                                analyst_options=opts, osm=self.settings["osm_lookup"])
         result.update(id=rid, name=name, created=created,
                       image_url=f"/api/history/{rid}/image", thumb_url=f"/api/history/{rid}/thumb",
                       options={"ocr": ocr, "exif_gps": exif_gps, "ask": list(ask),

@@ -41,7 +41,7 @@ is absent.
 {
   "state": "needs_setup",          // needs_setup | setting_up | loading | ready | error
   "error": null,                   // message when state == "error"
-  "version": "0.4.2",
+  "version": "0.4.3",
   "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
   "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
   "available_devices": ["CPU", "GPU", "NPU"],
@@ -273,6 +273,7 @@ browser dev mode the UI downloads the file instead and never calls this.
   "show_exif_gps": true,
   "share_findings": true,      // default for share_local when asking an analyst
   "analyst_web_search": true,  // Claude/ChatGPT may search the web to check what they read
+  "osm_lookup": false,         // look up text read in the photo on OpenStreetMap (text only)
   "keep_history": true,        // false: results are not stored (the current session still shows them)
   "theme": "system",           // system | light | dark (the UI applies it)
   "map_style": "streets",      // streets | satellite | offline (the map shown; offline is the automatic fallback)
