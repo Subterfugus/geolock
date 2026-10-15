@@ -41,7 +41,7 @@ is absent.
 {
   "state": "needs_setup",          // needs_setup | setting_up | loading | ready | error
   "error": null,                   // message when state == "error"
-  "version": "0.2.0",
+  "version": "0.3.0",
   "device": "GPU",                 // where CLIP runs once loaded: GPU | NPU | CPU | null
   "device_name": "Intel(R) Arc(TM) 140V GPU (16GB)",
   "available_devices": ["CPU", "GPU", "NPU"],

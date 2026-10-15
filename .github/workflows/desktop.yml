@@ -140,7 +140,8 @@ jobs:
             # Never replace a published installer: bump the version to publish a new one.
             echo "Release $tag already exists; leaving its installer as it is."
           else
+            notes="docs/releases/$tag.md"
+            [ -f "$notes" ] || { echo "Windows installer. Download, run, and GeoLock appears in the Start menu. On first launch it downloads the CLIP model once (about 600 MB)." > "$RUNNER_TEMP/notes.md"; notes="$RUNNER_TEMP/notes.md"; }
             gh release create "$tag" "${{ steps.out.outputs.file }}" --title "GeoLock $tag" \
-              --notes "Windows installer. Download, run, and GeoLock appears in the Start menu. On first launch it downloads the CLIP model once (about 600 MB)." \
-              --target "$GITHUB_SHA"
+              --notes-file "$notes" --target "$GITHUB_SHA"
           fi
