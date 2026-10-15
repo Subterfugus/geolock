@@ -3,7 +3,8 @@ name: Desktop app
 # Builds the GeoLock Windows installer:
 #   assets   (Linux)   small model assets + the pinned CLIP download, checked against PyTorch
 #   windows  (Windows) frozen Python backend, smoke test with the real model, Tauri + NSIS installer
-# Pushes to main also publish the installer as a GitHub release (v<version>).
+# Pushes to main also publish the installer as a GitHub release (v<version>), once per
+# version: an existing release is never overwritten.
 
 on:
   push:
@@ -132,7 +133,8 @@ jobs:
         run: |
           tag="v${{ steps.out.outputs.version }}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${{ steps.out.outputs.file }}" --clobber
+            # Never replace a published installer: bump the version to publish a new one.
+            echo "Release $tag already exists; leaving its installer as it is."
           else
             gh release create "$tag" "${{ steps.out.outputs.file }}" --title "GeoLock $tag" \
               --notes "Windows installer. Download, run, and GeoLock appears in the Start menu. On first launch it downloads the CLIP model once (about 600 MB)." \
