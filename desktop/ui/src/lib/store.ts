@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  HistorySummary, MapStyleKind, Provider, Result, Settings, SetupInfo, Status,
+  AnalystProgress, HistorySummary, MapStyleKind, ModelOptions, Provider, Result, Settings, SetupInfo, Status,
 } from './types';
 
 export interface QueueItem {
@@ -53,6 +53,12 @@ export interface AppState {
   /** Progress of the current run of queued photos; null when the queue is idle. */
   batch: { total: number; done: number; failed: number; ids: string[] } | null;
   asking: Record<string, Provider | undefined>;
+  /** When the current ask started (ms), so progress from an earlier ask is ignored. */
+  askStartedAt: number;
+  /** Live progress of the analyst being asked, polled while it works. */
+  analystProgress: AnalystProgress | null;
+  /** Models and effort levels the installed CLIs accept; null until loaded. */
+  models: ModelOptions | null;
   search: string;
   /** Library filter: every photo, or only those with their own GPS. */
   libraryFilter: 'all' | 'gps';
@@ -81,8 +87,8 @@ let state: AppState = {
   setup: null,
   setupSeen: false,
   settings: null,
-  themeResolved: 'dark',
-  mapStyle: 'offline',
+  themeResolved: typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+  mapStyle: 'streets',
   history: null,
   results: {},
   selectedId: null,
@@ -91,6 +97,9 @@ let state: AppState = {
   queue: [],
   batch: null,
   asking: {},
+  askStartedAt: 0,
+  analystProgress: null,
+  models: null,
   search: '',
   libraryFilter: 'all',
   exporting: false,

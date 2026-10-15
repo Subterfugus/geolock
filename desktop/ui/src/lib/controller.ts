@@ -2,6 +2,7 @@
 // Components call these functions; they read state through the store.
 import {
   cancelSetup, clearHistory, deleteResult, getHistory, getResult, getSetup, getSettings, getStatus,
+  getAnalystModels, getAnalystProgress, stopAnalysts,
   importModels, locatePhoto, putSettings, refreshAnalysts, rerunPhoto, startSetup, type LocateOptions,
 } from './api';
 import { ApiError, assetUrl, currentBackend, resolveBackend } from './backend';
@@ -42,6 +43,7 @@ async function statusLoop(): Promise<void> {
       if (before.setupSeen) toast('success', 'GeoLock is ready', 'Drop a photo anywhere to locate it.');
       if (!before.settings) void loadSettings();
       void loadLibrary();
+      void loadModels();
       void drainQueue();
     }
     delay = status.state === 'ready' ? 4000 : 900;
@@ -442,21 +444,60 @@ export async function reanalyse(id: string): Promise<void> {
 export async function askAnalyst(id: string, provider: Provider): Promise<void> {
   if (getState().asking[id]) return;
   const label = provider === 'claude' ? 'Claude' : 'ChatGPT';
-  update((s) => ({ asking: { ...s.asking, [id]: provider } }));
+  update((s) => ({ asking: { ...s.asking, [id]: provider }, askStartedAt: Date.now(), analystProgress: null }));
+  let polling = true;
+  const poll = async () => {
+    while (polling) {
+      try {
+        const p = await getAnalystProgress();
+        if (polling) patch({ analystProgress: p });
+      } catch {
+        /* the status loop reports connection problems */
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  };
+  void poll();
   try {
     const r = await rerunPhoto(id, currentLocateOptions([provider]));
     update((s) => ({ results: { ...s.results, [id]: r }, history: upsertHistory(s.history, summarize(r)) }));
     const a = r.analysts.find((x) => x.provider === provider);
-    if (a && !a.ok) toast('error', `${label} didn't answer`, a.error ?? undefined);
+    if (stopRequested.has(id)) toast('info', `Stopped ${label}`, "The photo keeps the result it had.");
+    else if (a && !a.ok) toast('error', `${label} didn't answer`, a.error ?? undefined);
     else toast('success', `${label} has answered`);
   } catch (e) {
     toast('error', `Couldn't ask ${label}`, errorText(e));
   } finally {
+    polling = false;
+    stopRequested.delete(id);
     update((s) => {
       const asking = { ...s.asking };
       delete asking[id];
-      return { asking };
+      return { asking, analystProgress: null };
     });
+  }
+}
+
+const stopRequested = new Set<string>();
+
+/** Stop button on the progress card: ends the analyst's run; GeoLock's own result stays. */
+export async function stopAnalyst(id: string): Promise<void> {
+  stopRequested.add(id);
+  try {
+    await stopAnalysts();
+  } catch (e) {
+    stopRequested.delete(id);
+    toast('error', "Couldn't stop it", errorText(e));
+  }
+}
+
+/** The model lists for the second-opinion pickers (asks the CLIs; cached by the backend). */
+export async function loadModels(refresh = false): Promise<void> {
+  if (!refresh && getState().models) return;
+  try {
+    patch({ models: await getAnalystModels(refresh) });
+  } catch {
+    /* the pickers fall back to "Default" */
   }
 }
 
@@ -479,6 +520,7 @@ export async function updateSettings(p: Partial<Settings>): Promise<void> {
 }
 
 export async function recheckAnalysts(): Promise<void> {
+  void loadModels(true);
   try {
     const res = await refreshAnalysts();
     const s = getState().status;

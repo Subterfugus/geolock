@@ -113,9 +113,12 @@ class Backend:
         eng = self.engine
         if eng is None:
             raise HTTPException(409, "The models are not loaded yet.")
+        opts = {p: {"model": self.settings[f"{p}_model"], "effort": self.settings[f"{p}_effort"]}
+                for p in ("claude", "chatgpt")}
         with self.lock:
             result = eng.locate(photo, use_ocr=ocr, use_exif_gps=exif_gps, ask=ask,
-                                share_local=share_local, prior_analysts=prior)
+                                share_local=share_local, prior_analysts=prior,
+                                analyst_options=opts)
         result.update(id=rid, name=name, created=created,
                       image_url=f"/api/history/{rid}/image", thumb_url=f"/api/history/{rid}/thumb",
                       options={"ocr": ocr, "exif_gps": exif_gps, "ask": list(ask),
@@ -326,6 +329,25 @@ def create_app(backend, token=None):
     def analysts_refresh():
         from ..analyst import detect
         return detect(refresh=True)
+
+    @app.get("/api/analysts/models")
+    def analysts_models(refresh: bool = False):
+        """The models and effort levels the installed claude / codex CLIs accept."""
+        from ..analyst import model_options
+        return model_options(refresh=refresh)
+
+    @app.get("/api/analysts/progress")
+    def analysts_progress():
+        """What each analyst is doing right now; polled by the app while it waits."""
+        from ..analyst import PROGRESS
+        return PROGRESS.snapshot()
+
+    @app.post("/api/analysts/stop")
+    def analysts_stop():
+        """Stop the analysts that are still working. The photo keeps GeoLock's own result
+        (and any earlier answer from that analyst)."""
+        from ..analyst import PROGRESS
+        return {"stopped": PROGRESS.cancel()}
 
     # ------------------------------------------------------------------- data
     @app.get("/data/{name}")

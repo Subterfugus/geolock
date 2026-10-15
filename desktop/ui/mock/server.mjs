@@ -25,12 +25,18 @@ const S = {
   bench: null,
   settings: {
     device: 'AUTO', read_text: true, show_exif_gps: true, share_findings: true,
-    keep_history: true, theme: 'system', map_style: 'offline',
+    keep_history: true, theme: 'system', map_style: 'streets',
+    claude_model: '', claude_effort: '', chatgpt_model: '', chatgpt_effort: '', settings_rev: 2,
   },
   analysts: {
     claude: { available: true, via: 'claude-code', detail: 'Claude Code, your Claude login' },
-    chatgpt: { available: false, via: null, detail: 'Install the Codex CLI and sign in (codex login) to use your ChatGPT plan.' },
+    chatgpt: process.env.MOCK_CHATGPT
+      ? { available: true, via: 'codex', detail: 'Codex CLI, your ChatGPT login' }
+      : { available: false, via: null, detail: 'Install the Codex CLI and sign in (codex login) to use your ChatGPT plan.' },
   },
+  /** The analysts' live progress, as GET /api/analysts/progress reports it. */
+  progress: {},
+  stopped: false,
   history: [],        // newest first, ids
   results: new Map(), // id -> Result
   images: new Map(),  // id -> { bytes, type }
@@ -204,6 +210,55 @@ function svgPhoto(label, [c1, c2, c3], w, h, kind = 'city') {
     ${hills}
     <text x="${w / 2}" y="${h * 0.93}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(h * 0.055)}" fill="#ffffff" opacity="0.85">${label.replace(/&/g, '&amp;')}</text>
   </svg>`;
+}
+
+// ------------------------------------------------------------- analyst progress
+const ASK_S = Number(process.env.MOCK_ASK_S || 9);
+const MODELS = {
+  claude: { installed: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], models: [
+    { id: '', name: 'Default', description: 'What Claude Code uses for your plan' },
+    { id: 'fable', name: 'Fable', description: 'The latest Fable model' },
+    { id: 'opus', name: 'Opus', description: 'The latest Opus model' },
+    { id: 'sonnet', name: 'Sonnet', description: 'The latest Sonnet model' },
+    { id: 'haiku', name: 'Haiku', description: 'The latest Haiku model' },
+  ] },
+  chatgpt: { installed: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], models: [
+    { id: '', name: 'Default', description: 'What your Codex settings pick' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', description: 'Fast, strong reasoning', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'low' },
+    { id: 'gpt-6-astra', name: 'GPT-6-Astra', description: 'Frontier intelligence for the most demanding work.', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'low' },
+    { id: 'gpt-5.5', name: 'GPT-5.5', description: 'Previous generation', efforts: ['low', 'medium', 'high', 'xhigh'], default_effort: 'medium' },
+  ] },
+};
+const THOUGHTS = [
+  'Checking which side the cars drive on',
+  'Reading the shop sign in the second crop',
+  'The façades look Haussmann-era: cream limestone, wrought-iron balconies',
+  'Ruling out Brussels: the street plate is French-only',
+  'Placing it near the river, central arrondissements',
+];
+
+/** Plays an analyst's stages over ASK_S seconds; resolves false if the user pressed Stop. */
+async function playProgress(provider) {
+  const t0 = now();
+  const model = S.settings[`${provider}_model`] || null;
+  const st = { stage: 'preparing', started: t0 / 1000, updated: t0 / 1000, model, effort: S.settings[`${provider}_effort`] || null, note: '', chars: 0, error: null };
+  S.progress[provider] = st;
+  S.stopped = false;
+  while (now() - t0 < ASK_S * 1000) {
+    if (S.stopped) {
+      Object.assign(st, { stage: 'stopped', error: 'Stopped before it answered.', updated: now() / 1000 });
+      return false;
+    }
+    const f = (now() - t0) / (ASK_S * 1000);
+    st.stage = f < 0.08 ? 'preparing' : f < 0.2 ? 'starting' : f < 0.82 ? 'thinking' : 'writing';
+    if (st.stage !== 'preparing' && !st.model) st.model = provider === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol';
+    if (st.stage === 'thinking') st.note = THOUGHTS[Math.min(THOUGHTS.length - 1, Math.floor(((f - 0.2) / 0.62) * THOUGHTS.length))];
+    st.chars = Math.round(f * 5200);
+    st.updated = now() / 1000;
+    await sleep(250);
+  }
+  Object.assign(st, { stage: 'done', updated: now() / 1000 });
+  return true;
 }
 
 // ------------------------------------------------------------- analyst answers
@@ -553,6 +608,17 @@ async function route(req, res) {
     ] };
     return send(res, 200, S.bench);
   }
+  if (p === '/api/analysts/models' && m === 'GET') return send(res, 200, MODELS);
+  if (p === '/api/analysts/progress' && m === 'GET') {
+    const prov = S.progress;
+    const running = Object.values(prov).some((v) => !['done', 'error', 'stopped'].includes(v.stage));
+    return send(res, 200, { running, now: now() / 1000, providers: prov });
+  }
+  if (p === '/api/analysts/stop' && m === 'POST') {
+    const n = Object.values(S.progress).filter((v) => !['done', 'error', 'stopped'].includes(v.stage)).length;
+    S.stopped = true;
+    return send(res, 200, { stopped: n });
+  }
   if (p === '/api/analysts/refresh' && m === 'POST') {
     await sleep(600);
     return send(res, 200, S.analysts);
@@ -595,15 +661,18 @@ async function route(req, res) {
       if (ask.includes('chatgpt') && !S.analysts.chatgpt.available) {
         return fail(res, 400, 'ChatGPT is not set up. Install the Codex CLI and sign in (codex login).');
       }
-      if (ask.includes('claude')) {
-        await sleep(2000);
-        const others = r.analysts.filter((a) => a.provider !== 'claude');
+      for (const provider of ask) {
+        if (!(await playProgress(provider))) continue; // stopped: keep what the photo had
+        const others = r.analysts.filter((a) => a.provider !== provider);
         const top = r.guesses[0];
-        const claude = claudeAnswer(r, [
-          { place: `${top.place?.name ?? top.country}, ${top.country}`, country: top.country, iso2: top.country_code, lat: top.lat + 0.01, lon: top.lon - 0.01, radius_km: 3, confidence: 0.64 },
+        const answer = claudeAnswer(r, [
+          { place: `${top.place?.name ?? top.country}, ${top.country}`, country: top.country, iso2: top.country_code, lat: top.lat + 0.01, lon: top.lon - 0.01, radius_km: 3, confidence: 0.64, why: 'The signage and the façades agree.' },
         ], `Looking at the scene, I'd place this in ${top.place?.name ?? top.country}. The architecture, the signage and the light all agree with ${top.country}.`,
-        [{ category: 'signs', label: 'Signs', seen: 'Local signage', suggests: top.country }, { category: 'other', label: 'Other', seen: 'Street layout', suggests: top.place?.name ?? top.region }], 'right', null);
-        r.analysts = [...others, claude];
+        [{ category: 'signs', label: 'Signs', seen: 'Local signage', suggests: top.country }, { category: 'other', label: 'Other', seen: 'Street layout', suggests: top.place?.name ?? top.region }], 'right', null,
+        provider === 'chatgpt'
+          ? { provider: 'chatgpt', name: 'ChatGPT', via: 'Codex CLI, your ChatGPT login', model: S.progress.chatgpt?.model ?? 'gpt-6.1-sol', effort: S.settings.chatgpt_effort || null, ms: ASK_S * 1000 }
+          : { model: S.progress.claude?.model ?? 'claude-opus-5-5', effort: S.settings.claude_effort || null, ms: ASK_S * 1000 });
+        r.analysts = [...others, answer];
       }
       r.options = { ...r.options, ask: ask.filter((a) => a) };
       S.results.set(id, finishResult(r));

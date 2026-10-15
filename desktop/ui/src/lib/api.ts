@@ -1,6 +1,7 @@
 import { apiRequest } from './backend';
 import type {
   Benchmark, HistorySummary, Provider, Result, Settings, SetupInfo, Status, AnalystStatus,
+  AnalystProgress, ModelOptions,
 } from './types';
 
 export const getStatus = () => apiRequest<Status>('GET', '/api/status');
@@ -15,6 +16,11 @@ export const putSettings = (patch: Partial<Settings>) =>
   apiRequest<Settings>('PUT', '/api/settings', { json: patch });
 export const refreshAnalysts = () =>
   apiRequest<Record<Provider, AnalystStatus>>('POST', '/api/analysts/refresh');
+
+export const getAnalystModels = (refresh = false) =>
+  apiRequest<ModelOptions>('GET', `/api/analysts/models${refresh ? '?refresh=true' : ''}`);
+export const getAnalystProgress = () => apiRequest<AnalystProgress>('GET', '/api/analysts/progress');
+export const stopAnalysts = () => apiRequest<{ stopped: number }>('POST', '/api/analysts/stop');
 
 export const getBenchmark = () => apiRequest<Benchmark>('GET', '/api/diagnostics/benchmark');
 export const runBenchmark = () => apiRequest<Benchmark>('POST', '/api/diagnostics/benchmark');

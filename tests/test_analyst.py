@@ -44,6 +44,13 @@ import json, sys
 args = sys.argv[1:]
 if args[:2] == ["auth", "status"]:
     print(json.dumps({"loggedIn": True, "authMethod": "oauth_token"})); sys.exit(0)
+if args == ["--help"]:
+    print("  --effort <level>     Effort level for the current session\\n"
+          "                       (low, medium, high, xhigh, max)\\n"
+          "  --model <model>      Model for the current session. Provide\\n"
+          "                       an alias for the latest model (e.g.\\n"
+          "                       'fable', 'opus', or 'sonnet') or a\\n"
+          "                       model's full name."); sys.exit(0)
 msg = json.loads(sys.stdin.readline())
 content = msg["message"]["content"]
 images = [c for c in content if c["type"] == "image"]
@@ -53,6 +60,17 @@ assert "--json-schema" in args and "--tools" in args
 here = __import__("os").path.dirname(sys.argv[0])
 open(__import__("os").path.join(here, "claude.prompt"), "w").write(content[-1]["text"])
 open(__import__("os").path.join(here, "claude.images"), "w").write(str(len(images)))
+open(__import__("os").path.join(here, "claude.args"), "w").write(json.dumps(args))
+if "--include-partial-messages" in args:
+    ev = lambda e: print(json.dumps({"type": "stream_event", "event": e}), flush=True)
+    print(json.dumps({"type": "system", "subtype": "init", "model": "claude-test"}), flush=True)
+    ev({"type": "message_start", "message": {"model": "claude-test"}})
+    ev({"type": "content_block_start", "content_block": {"type": "thinking"}})
+    ev({"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "Looking at the signs.\\nYellow sign: Germany"}})
+    ev({"type": "content_block_start", "content_block": {"type": "text"}})
+    ev({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "{}"}})
+if "slow" in open(__import__("os").path.join(here, "mode")).read():
+    __import__("time").sleep(60)
 print(json.dumps({"type": "assistant", "message": {"model": "claude-test", "content": []}}))
 print(json.dumps({"type": "result", "is_error": False, "result": "ok",
                   "structured_output": ANSWER}))
@@ -63,6 +81,17 @@ import json, sys
 args = sys.argv[1:]
 if args[:2] == ["login", "status"]:
     print("Logged in using ChatGPT"); sys.exit(0)
+if args[:2] == ["debug", "models"]:
+    lv = lambda *ls: [{"effort": l, "description": ""} for l in ls]
+    print(json.dumps({"models": [
+        {"slug": "gpt-b", "display_name": "GPT-B", "visibility": "list", "priority": 2,
+         "input_modalities": ["text", "image"], "supported_reasoning_levels": lv("low", "high", "ultra"),
+         "default_reasoning_level": "low"},
+        {"slug": "gpt-a", "display_name": "GPT-A", "visibility": "list", "priority": 1,
+         "input_modalities": ["text", "image"], "supported_reasoning_levels": lv("low", "medium", "xhigh")},
+        {"slug": "gpt-text", "display_name": "Text only", "visibility": "list", "priority": 3,
+         "input_modalities": ["text"]},
+        {"slug": "secret", "display_name": "Hidden", "visibility": "hide", "priority": 0}]})); sys.exit(0)
 assert args[0] == "exec" and "--image" in args and "--output-schema" in args
 imgs = [args[i + 1] for i, a in enumerate(args) if a == "--image"]
 assert all(open(img, "rb").read(2) == b"\\xff\\xd8" for img in imgs)
@@ -71,6 +100,10 @@ prompt = sys.stdin.read()
 assert "Where on Earth" in prompt
 here = __import__("os").path.dirname(sys.argv[0])
 open(__import__("os").path.join(here, "codex.images"), "w").write(str(len(imgs)))
+open(__import__("os").path.join(here, "codex.args"), "w").write(json.dumps(args))
+if "--json" in args:
+    print(json.dumps({"type": "turn.started"}), flush=True)
+    print(json.dumps({"type": "item.completed", "item": {"type": "reasoning", "text": "**Reading the sign**"}}), flush=True)
 out = args[args.index("--output-last-message") + 1]
 open(out, "w").write(json.dumps(ANSWER))
 """
@@ -81,6 +114,7 @@ def fake_clis(tmp_path, monkeypatch):
     answer = f"ANSWER = {json.dumps(ANSWER)!r}\nANSWER = __import__('json').loads(ANSWER)\n"
     _fake(tmp_path, "claude", answer + FAKE_CLAUDE)
     _fake(tmp_path, "codex", answer + FAKE_CODEX)
+    (tmp_path / "mode").write_text("fast")
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
     analyst._detect_cache["value"] = None
     yield tmp_path
@@ -110,6 +144,67 @@ def test_asks_both_and_strips_metadata(fake_clis):
     assert r["checklist"][1]["label"] == "Signs" and r["guesses"][0]["why"]
     assert r["ruled_out"][0]["place"] == "Switzerland" and r["crops"] == []
     assert r["clues"][0]["clue"].startswith("Driving side: ")  # flat list for older readers
+
+
+def test_model_and_effort_reach_the_clis(fake_clis):
+    img = Image.new("RGB", (800, 600), (20, 90, 40))
+    res = analyst.ask_all(["claude", "chatgpt"], img, options={
+        "claude": {"model": "opus", "effort": "high"}, "chatgpt": {"model": "gpt-a", "effort": "xhigh"}})
+    assert all(r["ok"] for r in res), [r["error"] for r in res]
+    cargs = json.loads((fake_clis / "claude.args").read_text())
+    assert cargs[cargs.index("--model") + 1] == "opus" and cargs[cargs.index("--effort") + 1] == "high"
+    gargs = json.loads((fake_clis / "codex.args").read_text())
+    assert gargs[gargs.index("--model") + 1] == "gpt-a"
+    assert 'model_reasoning_effort="xhigh"' in gargs and gargs[-1] == "-"
+    assert res[0]["effort"] == "high" and res[1]["model"] == "gpt-a"
+    # no choice: no flags, the CLI's own defaults
+    analyst.ask_all(["claude"], img)
+    cargs = json.loads((fake_clis / "claude.args").read_text())
+    assert "--model" not in cargs and "--effort" not in cargs
+
+
+def test_progress_follows_the_stream(fake_clis):
+    img = Image.new("RGB", (800, 600), (20, 90, 40))
+    analyst.ask_all(["claude", "chatgpt"], img, options={"claude": {"effort": "low"}})
+    snap = analyst.PROGRESS.snapshot()
+    assert not snap["running"]
+    c, g = snap["providers"]["claude"], snap["providers"]["chatgpt"]
+    assert c["stage"] == g["stage"] == "done"
+    assert c["model"] == "claude-test" and c["effort"] == "low" and c["chars"] > 10
+    assert c["note"] == "Yellow sign: Germany"  # the latest line of its thinking
+    assert g["note"] == "Reading the sign"
+
+
+def test_stop_ends_a_running_analyst(fake_clis):
+    import threading
+    (fake_clis / "mode").write_text("slow")
+    img = Image.new("RGB", (800, 600), (20, 90, 40))
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("r", analyst.ask_all(["claude"], img)))
+    t.start()
+    for _ in range(100):  # wait until the fake CLI is thinking
+        if analyst.PROGRESS.snapshot()["providers"].get("claude", {}).get("stage") == "writing":
+            break
+        __import__("time").sleep(0.1)
+    assert analyst.PROGRESS.snapshot()["running"]
+    assert analyst.PROGRESS.cancel() == 1
+    t.join(timeout=15)
+    assert not t.is_alive()
+    (r,) = out["r"]
+    assert not r["ok"] and r["stopped"] and r["ms"] < 30000
+    assert analyst.PROGRESS.snapshot()["providers"]["claude"]["stage"] == "stopped"
+    (fake_clis / "mode").write_text("fast")
+    assert analyst.ask_all(["claude"], img)[0]["ok"]  # the next ask is not stopped
+
+
+def test_model_lists_come_from_the_clis(fake_clis):
+    opts = analyst.model_options(refresh=True)
+    c, g = opts["claude"], opts["chatgpt"]
+    assert [m["id"] for m in c["models"]] == ["", "fable", "opus", "sonnet", "haiku"]
+    assert c["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert [m["id"] for m in g["models"]] == ["", "gpt-a", "gpt-b"]  # by priority; listed, takes images
+    assert g["models"][2]["efforts"] == ["low", "high"] and g["models"][2]["default_effort"] == "low"
+    assert g["efforts"] == ["low", "medium", "high", "xhigh"]
 
 
 def _sign_photo():

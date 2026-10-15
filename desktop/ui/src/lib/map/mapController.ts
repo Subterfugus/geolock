@@ -5,13 +5,13 @@ import { dataUrl } from '../backend';
 import { guessTitle } from '../format';
 import { geodesicCircle, greatCircle } from '../geo';
 import type { Guess, MapStyleKind, Result } from '../types';
-import { FONT_STACK, PALETTE, offlineStyle, onlineStyle, type Theme } from './mapStyles';
+import { FONT_STACK, MAX_ZOOM, PALETTE, offlineStyle, onlineStyle, type Theme } from './mapStyles';
 
 type Fc = FeatureCollection<Point | Polygon | MultiLineString>;
 
 const CONF_COLOR: Record<Theme, Record<Guess['label'], string>> = {
-  dark: { high: '#34d399', medium: '#fbbf24', low: '#8ea3c7' },
-  light: { high: '#059669', medium: '#d97706', low: '#5b6f94' },
+  dark: { high: '#93d070', medium: '#e9b440', low: '#8e8a7f' },
+  light: { high: '#3f8a2a', medium: '#b7791f', low: '#7b776c' },
 };
 
 // Shared between map instances so the 3.6 MB admin-1 file is fetched once per run.
@@ -67,6 +67,8 @@ const EMPTY: Fc = { type: 'FeatureCollection', features: [] };
 export interface GeoMapCallbacks {
   onGuessClick(index: number): void;
   onStyleFailed(kind: MapStyleKind): void;
+  /** The map zoomed; used to suggest Streets when the offline map runs out of detail. */
+  onZoom?(zoom: number): void;
 }
 
 /** A MapLibre map with the GeoLock basemap, result overlays and DOM pins. */
@@ -83,6 +85,8 @@ export class GeoMap {
   private truthFc: Fc = EMPTY;
   private labelKey = -1;
   private destroyed = false;
+  /** The themed streets style failed and the backup style is in use. */
+  private backup = false;
 
   constructor(container: HTMLElement, kind: MapStyleKind, theme: Theme, private cb: GeoMapCallbacks, opts: { zoom?: number } = {}) {
     this.kind = kind;
@@ -93,7 +97,7 @@ export class GeoMap {
       center: [12, 24],
       zoom: opts.zoom ?? 1.7,
       minZoom: 1,
-      maxZoom: 12,
+      maxZoom: MAX_ZOOM[kind],
       renderWorldCopies: false,
       attributionControl: false,
       dragRotate: false,
@@ -108,23 +112,32 @@ export class GeoMap {
     // A static map (setup screen, empty library) does not redraw by itself when data arrives; nudge it.
     this.map.on('sourcedata', (e) => { if (e.isSourceLoaded) this.map.triggerRepaint(); });
     this.map.on('error', () => {
+      if (this.styleReady || this.kind === 'offline' || this.destroyed) return;
+      // The dark streets style failed: try the standard one before giving up on the online map.
+      if (this.kind === 'streets' && !this.backup) {
+        this.backup = true;
+        this.map.setStyle(onlineStyle('streets', this.theme, true), { diff: false });
+        return;
+      }
       // A remote style that never loaded falls back to the offline map.
-      if (!this.styleReady && this.kind !== 'offline' && !this.destroyed) this.cb.onStyleFailed(this.kind);
+      this.cb.onStyleFailed(this.kind);
     });
     void loadCountries().then(() => this.styleReady && this.ensureBasemap());
   }
 
   private styleFor(kind: MapStyleKind, theme: Theme): StyleSpecification | string {
-    return kind === 'offline' ? offlineStyle(theme) : onlineStyle(kind, theme);
+    return kind === 'offline' ? offlineStyle(theme) : onlineStyle(kind, theme, kind === 'streets' && this.backup);
   }
 
   // ------------------------------------------------------------ style
 
   setStyleKind(kind: MapStyleKind, theme: Theme): void {
     if (kind === this.kind && theme === this.theme) return;
+    if (theme !== this.theme) this.backup = false;
     this.kind = kind;
     this.theme = theme;
     this.styleReady = false;
+    this.map.setMaxZoom(MAX_ZOOM[kind]);
     this.buildOverlayData();
     this.map.setStyle(this.styleFor(kind, theme), { diff: false });
   }
@@ -187,6 +200,7 @@ export class GeoMap {
   }
 
   private onZoom(): void {
+    this.cb.onZoom?.(this.map.getZoom());
     if (!this.styleReady) return;
     const z = this.map.getZoom();
     if (this.kind === 'offline' && z >= 3.5 && !admin1Fc) void this.loadAdmin1Now();
@@ -214,7 +228,7 @@ export class GeoMap {
           'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 5.5, 0.6, 7.5, 0.18, 9, 0],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
-            0, 'rgba(37,99,235,0)', 0.15, '#2563eb', 0.4, '#22c55e', 0.65, '#facc15', 0.85, '#f97316', 1, '#ef4444',
+            0, 'rgba(255,140,60,0)', 0.15, 'rgba(255,170,90,0.45)', 0.4, '#ffb15c', 0.65, '#ff8a3d', 0.85, '#ff6b2c', 1, '#e8381a',
           ],
         },
       });
@@ -359,7 +373,9 @@ export class GeoMap {
   // ----------------------------------------------------------- camera
 
   flyTo(lat: number, lon: number, radiusKm: number): void {
-    const zoom = radiusKm < 30 ? 8.6 : radiusKm < 100 ? 6.9 : radiusKm < 300 ? 5.8 : 4.6;
+    // Small radii (an analyst naming a street) zoom right in when the map has street detail.
+    const zoom = Math.min(MAX_ZOOM[this.kind],
+      radiusKm < 3 ? 14 : radiusKm < 10 ? 11.5 : radiusKm < 30 ? 9.2 : radiusKm < 100 ? 6.9 : radiusKm < 300 ? 5.8 : 4.6);
     this.map.flyTo({ center: [lon, lat], zoom, duration: 900, essential: true });
   }
 
@@ -417,7 +433,7 @@ export class GeoMap {
     ctx.drawImage(src, 0, 0, w, src.clientHeight);
     const dark = this.theme === 'dark';
     const col = CONF_COLOR[this.theme];
-    const font = (px: number, weight = 600) => `${weight} ${px}px "Inter Variable", "Segoe UI", system-ui, sans-serif`;
+    const font = (px: number, weight = 600) => `${weight} ${px}px "IBM Plex Sans", "Segoe UI", system-ui, sans-serif`;
     const r = this.result;
     const disc = (x: number, y: number, rad: number, fill: string, text: string, ring = '#ffffff') => {
       ctx.beginPath();

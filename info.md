@@ -22,7 +22,7 @@ confidence and the clues for each guess.
 | Deep analysis with a local vision-language model | Built but **not part of the plan** (Brady, 2026-10-14): the Claude / ChatGPT second opinion covers this; never run |
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). 2026-10-15: geoguessing checklist prompt and zoomed sign crops (fake CLIs only so far). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
-| **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Released as v0.3.0 on GitHub Releases. Every main build installs the real installer on a Windows CI runner, runs first-run setup and a locate, and screenshots the window (pushed to the `ci-screenshots` branch). Not yet run on the laptop |
+| **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Released as v0.3.0 on GitHub Releases; 0.4.0 (UX overhaul: model/effort pickers with live progress, street map, findable settings, new look). Every main build installs the real installer on a Windows CI runner, runs first-run setup and a locate, and screenshots the window (pushed to the `ci-screenshots` branch). Not yet run on the laptop |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
 | Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
 | Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
@@ -187,11 +187,29 @@ Start menu, and it runs in its own window. The browser version (`run.bat`) still
 - **UI** (`desktop/ui`, React + TypeScript + MapLibre): library of past photos, big map
   with heatmap, uncertainty circles and the photo's own GPS, an inspector with the best
   guess, other guesses, reasons, country odds, clues and the Claude / ChatGPT second
-  opinion (per photo, only on click), settings (processor, defaults, analysts, theme).
+  opinion (per photo, only on click, with model and reasoning-effort pickers and live
+  progress with Stop), settings (a labeled button in the library; sidebar with processor,
+  analysis, second opinion, map, appearance, library, shortcuts, about).
   Drag and drop photos or whole folders anywhere, paste (Ctrl+V), Ctrl+O for files and
   Ctrl+Shift+O for a folder (subfolders included). A batch shows "Locating 3 of 12" with a
-  Stop button and ends with a summary. Offline basemap; Streets and Satellite layers when
-  online.
+  Stop button and ends with a summary. Map: Streets (OpenFreeMap / OpenStreetMap vector
+  tiles, free, no key: roads, buildings, places, landmarks, zoom to 19) is the default;
+  Satellite (Esri imagery) carries OpenFreeMap roads and place names on top; Offline
+  (Natural Earth borders, zoom to 9) is the automatic fallback with no internet. The
+  dark streets style falls back to the light one, then to offline, if it fails to load.
+- **Second opinion controls**: `GET /api/analysts/models` lists the models each CLI
+  accepts (Claude: aliases and effort levels parsed from `claude --help`; ChatGPT: the
+  `codex debug models` catalogue, image-capable listed models only, each with its own
+  effort levels). The choice is saved as `claude_model` / `claude_effort` /
+  `chatgpt_model` / `chatgpt_effort` and passed as `--model` / `--effort` (Claude) and
+  `--model` / `-c model_reasoning_effort=...` (Codex). The CLIs run with streaming output
+  (`--include-partial-messages`, `codex exec --json`) so `GET /api/analysts/progress`
+  reports the stage (preparing, starting, thinking, writing, done) and the latest line of
+  thinking; `POST /api/analysts/stop` kills the CLI's process tree and the photo keeps
+  its earlier answer.
+- **Look** (0.4.0): "field instrument": warm graphite / paper, one signal-orange accent,
+  2-6 px corners, hairline borders instead of frosted glass, IBM Plex Sans with Plex Mono
+  for numbers and coordinates.
 - **Ground truth**: when a photo carries its own EXIF GPS (never used for the guess), the
   map shows it as a star with a dashed line to the selected guess, the inspector shows the
   distance, a band (street / city / region / country level, or missed) and which guess
@@ -438,6 +456,14 @@ about real-photo accuracy yet.
 
 ## Changelog
 
+- **2026-10-15**: Version 0.4.0, a UX overhaul after Brady's first use: model and
+  reasoning-effort pickers for Claude / ChatGPT with live progress and Stop; the street map
+  is the default (the 0.3 map opened offline, which has no roads, and zoom stopped at 12);
+  satellite with labels; a labeled Settings button and a settings sidebar; a new visual
+  style and app icon. Settings saved by 0.3 with the offline map move to streets once.
+  Release notes in `docs/releases/v0.4.0.md`. Tested with fake CLIs and the mock backend;
+  street tiles could not be loaded from the build machine (blocked), so they are
+  unchecked until the Windows CI screenshots or the laptop.
 - **2026-10-15**: Version 0.3.0, the first published installer: the desktop app plus the
   smarter second opinion, folder mode and export, and laptop speed mode. Release notes in
   `docs/releases/v0.3.0.md`.

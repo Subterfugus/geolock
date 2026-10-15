@@ -10,12 +10,13 @@ import { assetUrl } from '../lib/backend';
 import { copyText, openExternal } from '../lib/shell';
 import { mapHandle } from '../lib/map/mapController';
 import { Ocr } from './OcrBoxes';
+import { AskPanel } from './AskPanel';
 import {
-  ANALYST_COMPANY, ANALYST_NAME, confidenceName, coordText, deviceLabel, formatSeconds, fullDate, guessTitle, km, pct, plainCoords, radiusText,
+  ANALYST_COMPANY, ANALYST_NAME, confidenceName, effortLabel, coordText, deviceLabel, formatSeconds, fullDate, guessTitle, km, pct, plainCoords, radiusText,
 } from '../lib/format';
 import { patch, useStore } from '../lib/store';
 import type { Analyst, AnalystCrop, Clue, Guess, Provider, Result } from '../lib/types';
-import { Button, ConfidencePill, ConfidenceRing, cx, Flag, IconButton, Meter, SectionTitle, Spinner, confBg, confText } from './ui';
+import { Button, ConfidenceRing, cx, Flag, IconButton, Meter, SectionTitle, Spinner, confBg, confText } from './ui';
 
 const PROVIDER_VAR: Record<Provider, string> = { claude: 'var(--claude)', chatgpt: 'var(--chatgpt)' };
 
@@ -89,15 +90,18 @@ function ResultBody({ result }: { result: Result }) {
           <>
             <Hero guess={guess} index={index} />
             <GroundTruth result={result} index={index} />
+            <SecondOpinion result={result} />
             <OtherGuesses result={result} selected={index} />
             <Why guess={guess} index={index} />
             <Countries result={result} guess={guess} />
           </>
         ) : (
-          <p className="text-[13px] text-fg-2">GeoLock could not find a likely place for this photo.</p>
+          <>
+            <p className="text-[13px] text-fg-2">GeoLock could not find a likely place for this photo.</p>
+            <SecondOpinion result={result} />
+          </>
         )}
         <Clues result={result} />
-        <SecondOpinion result={result} />
         <Details result={result} />
       </div>
     </div>
@@ -148,16 +152,14 @@ function Hero({ guess, index }: { guess: Guess; index: number }) {
   const sub = [guess.region && guess.region !== t.main ? guess.region : null, guess.country].filter(Boolean).join(' · ');
   const near = guess.place && guess.place.km >= 60 ? `${Math.round(guess.place.km)} km from ${guess.place.name}` : null;
   return (
-    <section aria-label={index === 0 ? 'Best guess' : `Guess ${index + 1}`} className="rounded-2xl border border-border bg-surface-2 p-4">
+    <section aria-label={index === 0 ? 'Best guess' : `Guess ${index + 1}`} className="rounded-md border border-border bg-surface-2 p-4" style={{ borderLeft: '3px solid var(--accent)' }}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-3">
-          {index === 0 ? 'Best guess' : `Guess #${index + 1}`}
-        </span>
-        <ConfidencePill label={guess.label} value={guess.confidence} />
+        <span className="eyebrow">{index === 0 ? 'Best guess' : `Guess #${index + 1}`}</span>
+        <span className="eyebrow">{confidenceName(guess.label)} confidence</span>
       </div>
-      <div className="mt-3 flex items-center gap-4">
+      <div className="mt-3 flex items-end gap-4">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[23px] font-semibold leading-[1.15] tracking-[-0.025em]">{t.main}</h3>
+          <h3 className="truncate text-[23px] font-semibold leading-[1.15] tracking-[-0.015em]">{t.main}</h3>
           <p className="mt-1 flex items-center gap-1.5 truncate text-[13px] text-fg-2">
             <Flag code={guess.country_code} />
             <span className="truncate">{sub || guess.continent || ''}</span>
@@ -166,14 +168,10 @@ function Hero({ guess, index }: { guess: Guess; index: number }) {
         </div>
         <ConfidenceRing value={guess.confidence} label={guess.label} size={72} />
       </div>
-      <div className="mt-4">
-        <Meter value={guess.confidence} label={guess.label} />
-        <div className="mt-2 flex items-center justify-between text-[12px] text-fg-3">
-          <span title="68% of this guess's probability falls inside this radius">
-            Likely within <span className={cx('font-semibold tnum', confText(guess.label))}>{radiusText(guess.radius_km)}</span>
-          </span>
-          <span className="tnum">{confidenceName(guess.label)}</span>
-        </div>
+      <div className="mt-3 border-t border-border pt-2.5 text-[12px] text-fg-3">
+        <span title="68% of this guess's probability falls inside this radius">
+          Likely within <span className={cx('font-semibold tnum', confText(guess.label))}>{radiusText(guess.radius_km)}</span>
+        </span>
       </div>
       <div className="mt-4 flex items-center gap-2">
         <CopyCoords lat={guess.lat} lon={guess.lon} />
@@ -495,46 +493,10 @@ function ClueRow({ clue }: { clue: Clue }) {
 // ----------------------------------------------------- second opinions
 
 function SecondOpinion({ result }: { result: Result }) {
-  const status = useStore((s) => s.status?.analysts ?? {});
-  const asking = useStore((s) => s.asking[result.id]);
-  const providers: Provider[] = ['claude', 'chatgpt'];
-  const answered = (p: Provider) => result.analysts.find((a) => a.provider === p);
   return (
     <section aria-label="Second opinion">
       <SectionTitle>Second opinion</SectionTitle>
-      <div className="grid grid-cols-2 gap-2">
-        {providers.map((p) => {
-          const st = status[p];
-          const available = !!st?.available;
-          const busy = asking === p;
-          const done = answered(p);
-          const label = `Ask ${ANALYST_NAME[p]}`;
-          return (
-            <button
-              key={p}
-              type="button"
-              disabled={!available || !!asking}
-              onClick={() => void askAnalyst(result.id, p)}
-              title={available ? `${ANALYST_NAME[p]} sees only the photo and GeoLock's findings (if sharing is on).` : st?.detail ?? 'Not set up'}
-              className="group flex min-h-[52px] flex-col items-start justify-center gap-0.5 rounded-xl border border-border bg-surface-2 px-3 py-2 text-left transition-colors hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              <span className="flex w-full items-center gap-2 text-[13px] font-semibold">
-                <span className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-[10px] font-bold text-white" style={{ background: PROVIDER_VAR[p] }}>
-                  {p === 'claude' ? 'C' : 'G'}
-                </span>
-                {busy ? <Spinner size={13} className="text-fg-2" /> : null}
-                <span className="truncate">{busy ? `Asking ${ANALYST_NAME[p]}…` : done ? `Ask ${ANALYST_NAME[p]} again` : label}</span>
-              </span>
-              <span className="pl-[26px] text-[11px] text-fg-3">
-                {busy ? 'Usually 5–30 s' : available ? 'Uses your own login' : 'Not set up'}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <p className="mt-2 text-[11.5px] leading-snug text-fg-3">
-        Sends the photo (without GPS or other metadata) to Anthropic or OpenAI, using your own plan. Nothing is sent unless you click.
-      </p>
+      <AskPanel result={result} />
       {result.analysts.length > 0 && (
         <div className="mt-4 flex flex-col gap-3">
           {result.analysts.map((a) => <AnalystCard key={a.provider} analyst={a} result={result} />)}
@@ -549,7 +511,7 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
   const asking = useStore((s) => s.asking[resultId]);
   const color = PROVIDER_VAR[a.provider];
   const name = ANALYST_NAME[a.provider];
-  const meta = [a.model, a.ms != null ? formatSeconds(a.ms) : null].filter(Boolean).join(' · ');
+  const meta = [a.model, a.effort ? effortLabel(a.effort) : null, a.ms != null ? formatSeconds(a.ms) : null].filter(Boolean).join(' · ');
   const checklist = a.checklist ?? [];
   const ruledOut = a.ruled_out ?? [];
   const crops = a.crops ?? [];
