@@ -154,30 +154,54 @@ def cmd_eval(a):
 
 
 def _fit(eng, cases, a):
-    """Pick the settings that maximise the probability given to the true area."""
+    """Pick the settings that maximise the probability given to the true area: the GeoCLIP
+    temperature, the weight of CLIP's country guess, and a strength scale for each group
+    of clues (scene, text, time), by grid search and coordinate descent."""
     import json
     import time as _t
     import numpy as np
+    from .clues import GROUPS
     if len(cases) < 20:
         print(f"\nOnly {len(cases)} photos; --fit needs at least 20 to be meaningful. Not saving.")
         return
-    best = None
+    sims = [eng.gal_feats @ ev["q"] for ev, _, _ in cases]  # the big product, once per photo
+
+    def score(t, w, scales):
+        total = 0.0
+        for (ev, near, _), sim in zip(cases, sims):
+            lp, _, _ = eng.posterior(ev["q"], ev["p_country_clip"], ev["clues"], t, w, scales, sim)
+            total += np.log(np.exp(lp[near]).sum() + 1e-6)
+        return total / len(cases)
+
+    def grid(scales):
+        return max((score(t, w, scales), t, w) for t in (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
+                   for w in (0.0, 0.25, 0.5, 0.75, 1.0))
+
     print("\nFitting fusion settings (mean log-probability of the true area; higher is better):")
-    for t in (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0):
-        for w in (0.0, 0.25, 0.5, 0.75, 1.0):
-            score = 0.0
-            for ev, near, _ in cases:
-                lp, _, _ = eng.posterior(ev["q"], ev["p_country_clip"], ev["clues"], t, w)
-                score += np.log(np.exp(lp[near]).sum() + 1e-6)
-            score /= len(cases)
-            if best is None or score > best[0]:
-                best = (score, t, w)
-    score, t, w = best
-    cal = {"temperature": t, "country_weight": w, "score": round(float(score), 4),
-           "photos": len(cases), "fitted": _t.strftime("%Y-%m-%d %H:%M")}
-    (eng.models_dir / "calibration.json").write_text(json.dumps(cal, indent=2))
-    print(f"  best: temperature {t}, country weight {w} (score {score:.3f}). "
-          f"Saved to {eng.models_dir / 'calibration.json'}; the app uses it from now on.")
+    scales = {g: 1.0 for g in GROUPS}
+    base = score(eng.temperature, eng.country_weight, eng.clue_scales)
+    print(f"  current settings: {base:.3f}")
+    best, t, w = grid(scales)
+    print(f"  temperature {t}, country weight {w}: {best:.3f}")
+    counts = {g: sum(any(c.fit_group == g and c.strength > 0 for c in ev["clues"]) for ev, _, _ in cases)
+              for g in GROUPS}
+    for _ in range(2):
+        for g in GROUPS:
+            if counts[g] < 10:  # too few photos with such clues to fit their weight
+                continue
+            for v in (0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0):
+                sc = score(t, w, dict(scales, **{g: v}))
+                if sc > best + 1e-4:
+                    best, scales = sc, dict(scales, **{g: v})
+        best, t, w = grid(scales)
+    print(f"  clue scales {scales} (photos with such clues: {counts}), temperature {t}, "
+          f"country weight {w}: {best:.3f}")
+    path = Path(a.fit_out) if a.fit_out else eng.models_dir / "calibration.json"
+    cal = dict(eng.calibration, temperature=t, country_weight=w, clue_scales=scales,
+               analyst_weight=eng.analyst_weight, score=round(float(best), 4),
+               photos=len(cases), fitted=_t.strftime("%Y-%m-%d %H:%M"))
+    path.write_text(json.dumps(cal, indent=2))
+    print(f"  Saved to {path}" + ("; the app uses it from now on." if not a.fit_out else "."))
 
 
 def cmd_bench(a):
@@ -247,6 +271,8 @@ def main(argv=None):
     s.add_argument("--cluster-km", type=float, default=250.0)
     s.add_argument("--fit", action="store_true",
                    help="tune the fusion settings on these photos and save them")
+    s.add_argument("--fit-out", metavar="PATH",
+                   help="where --fit saves (default: calibration.json in the models folder)")
     s.add_argument("--csv", metavar="PATH", help="save per-photo results to a CSV file")
     s = sub.add_parser("testset", help="download an openly licensed geotagged test set")
     s.add_argument("folder")

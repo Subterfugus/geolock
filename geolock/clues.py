@@ -4,6 +4,13 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
+# Clue strengths are hand-set; `geolock eval --fit` re-scales them per group on real photos.
+GROUPS = ("scene", "text", "time")
+KIND_GROUPS = {"scene": "scene", "script": "text", "language": "text", "domain": "text",
+               "phone": "text", "currency": "text", "units": "text", "plate": "text",
+               "postcode": "text", "osm": "text", "timezone": "time", "sun": "time"}
+
+
 @dataclass
 class Clue:
     kind: str                 # exif | ocr | language | script | scene | vlm | timezone ...
@@ -18,14 +25,26 @@ class Clue:
     mix: float = 0.0
     spots: list = field(default_factory=list)
     country_odds: dict = field(default_factory=dict)  # iso2 -> analyst's probability
+    # Which strength scale `geolock eval --fit` tunes for it (see GROUPS); "" = from kind.
+    group: str = ""
 
-    def country_loglik(self, codes):
+    @property
+    def fit_group(self):
+        return self.group or KIND_GROUPS.get(self.kind, "")
+
+    def scaled(self, scales):
+        """Strength after the fitted scale for this clue's group (capped below 1)."""
+        s = (scales or {}).get(self.fit_group, 1.0)
+        return self.strength if s == 1.0 else float(min(0.97, self.strength * s))
+
+    def country_loglik(self, codes, strength=None):
         """Per-country log-likelihood vector for the list of iso2 codes."""
-        if self.strength <= 0 or not self.countries:
+        strength = self.strength if strength is None else strength
+        if strength <= 0 or not self.countries:
             return None
         w = np.array([self.countries.get(c, 0.0) for c in codes], dtype=np.float64)
         bg = self.background
-        return np.log((1 - self.strength) + self.strength * (bg + (1 - bg) * w))
+        return np.log((1 - strength) + strength * (bg + (1 - bg) * w))
 
     def to_json(self, name_fn=None):
         top = sorted(self.countries.items(), key=lambda kv: -kv[1])
