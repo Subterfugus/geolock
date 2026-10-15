@@ -9,7 +9,20 @@ for a second opinion using the plan you already pay for (see below).
 
 <sub>UI preview from a test sign, rendered with placeholder model weights, so the visual-similarity numbers in it are meaningless; the text clues are real.</sub>
 
-## Quick start (Windows)
+## Install (Windows desktop app)
+
+1. Download `GeoLock_<version>_x64-setup.exe` from the repository's Releases page (or the
+   `GeoLock-installer` artifact of the "Desktop app" workflow) and run it. No admin rights
+   needed; GeoLock appears in the Start menu.
+2. On first launch, click **Download and set up**: it fetches the CLIP model once
+   (609 MB) and prepares it for your processor. If you already have a GeoLock `models`
+   folder, choose **Use models from an existing GeoLock folder** instead.
+3. Drop photos anywhere in the window, paste with Ctrl+V, or press Ctrl+O.
+
+How the app is put together: [desktop/README.md](desktop/README.md) and
+[desktop/API.md](desktop/API.md).
+
+## Quick start from source (Windows)
 
 1. Install [Python 3.12](https://www.python.org/downloads/) (tick "Add python.exe to PATH").
 2. Open PowerShell in this folder and run:
