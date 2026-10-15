@@ -62,8 +62,8 @@ def cmd_locate(a):
                 print(f"    {g['confidence']:6.1%}  {g['lat']:.4f}, {g['lon']:.4f}  ±{g['radius_km']:.0f} km  "
                       f"{', '.join(x for x in (g['place'], g['country']) if x)}"
                       + (f"  ({g['why']})" if g.get("why") else ""))
-            for r in an.get("ruled_out", []):
-                print(f"    not {r['place']}: {r['why']}")
+            for x in an.get("ruled_out", []):
+                print(f"    not {x['place']}: {x['why']}")
         for c in r["clues"]:
             if c["strength"] > 0:
                 print(f"  clue: {c['title']} — {c['detail']}")
