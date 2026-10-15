@@ -61,7 +61,9 @@ def run_setup(port):
         try:
             st = call(port, "/api/status", timeout=30)
             rep = call(port, "/api/setup", timeout=30)
-        except (TimeoutError, OSError) as e:  # the backend can be busy for a while converting
+        except urllib.error.HTTPError:
+            raise
+        except (TimeoutError, urllib.error.URLError) as e:  # busy for a while converting
             print(f"  {time.time() - t0:5.0f}s status not answered yet ({e})", flush=True)
             if time.time() - t0 > 1500:
                 raise SystemExit("setup timed out")
