@@ -108,6 +108,32 @@ def summary_of(result):
     }
 
 
+EXPORT_SUFFIXES = (".json", ".csv", ".kml", ".png")
+MAX_EXPORT_BYTES = 200 * 1024 * 1024
+
+
+def write_export(path, data):
+    """Writes an export the UI built to the path the user picked in the Save dialog.
+
+    Only absolute paths with an export extension, into a folder that exists, are allowed:
+    the token keeps other programs out, and this keeps a bug in the UI from writing anywhere
+    else. Returns the resolved path.
+    """
+    p = Path(str(path or "").strip().strip('"'))
+    if not p.is_absolute():
+        raise ValueError("Choose where to save the file.")
+    if p.suffix.lower() not in EXPORT_SUFFIXES:
+        raise ValueError(f"Exports are saved as {', '.join(EXPORT_SUFFIXES)} files.")
+    if not p.parent.is_dir():
+        raise ValueError(f"The folder {p.parent} does not exist.")
+    if len(data) > MAX_EXPORT_BYTES:
+        raise ValueError("That export is too large.")
+    tmp = p.with_name(p.name + ".part")
+    tmp.write_bytes(data)
+    tmp.replace(p)
+    return p
+
+
 class Library:
     def __init__(self, root):
         self.root = Path(root)

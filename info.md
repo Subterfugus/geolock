@@ -188,8 +188,22 @@ Start menu, and it runs in its own window. The browser version (`run.bat`) still
   with heatmap, uncertainty circles and the photo's own GPS, an inspector with the best
   guess, other guesses, reasons, country odds, clues and the Claude / ChatGPT second
   opinion (per photo, only on click), settings (processor, defaults, analysts, theme).
-  Drag and drop anywhere, paste, Ctrl+O. Offline basemap; Streets and Satellite layers
-  when online.
+  Drag and drop photos or whole folders anywhere, paste (Ctrl+V), Ctrl+O for files and
+  Ctrl+Shift+O for a folder (subfolders included). A batch shows "Locating 3 of 12" with a
+  Stop button and ends with a summary. Offline basemap; Streets and Satellite layers when
+  online.
+- **Ground truth**: when a photo carries its own EXIF GPS (never used for the guess), the
+  map shows it as a star with a dashed line to the selected guess, the inspector shows the
+  distance, a band (street / city / region / country level, or missed) and which guess
+  came closest, library rows carry a "km off" badge, a "With GPS" filter narrows the list,
+  and an accuracy card gives the median error and the share within 25 / 200 / 750 /
+  2,500 km for the photos shown.
+- **Export**: per photo (inspector download button or right-click) as a PNG of the map as
+  shown (pins, photo inset, caption), KML for Google Earth (guesses, uncertainty circles,
+  analyst guesses, the photo's GPS), CSV (one row per guess) or JSON (the full result). The
+  library button exports the photos shown (search and filter applied) as CSV, KML or
+  JSON. The UI builds the file; the native Save dialog picks the path and the backend's
+  `/api/save` writes it (absolute path, export extensions only).
 - **First run**: the installer carries the small assets (GeoCLIP weights, gallery
   coordinates, prompt embeddings, calibration, OCR models). The CLIP ViT-L/14 vision
   encoder (609 MB) is downloaded once from Hugging Face as the Xenova ONNX export, pinned
@@ -403,9 +417,15 @@ about real-photo accuracy yet.
    points are thin.
 5. Sun direction: shadows plus the EXIF time give latitude and orientation hints.
 6. Detectors for licence plates, bollards and road signs (the classic GeoGuessr clues).
-7. Batch mode in the app: drop a folder, get a map of all photos and a CSV.
+7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Desktop app features: folder / batch mode with progress and Stop, folder
+  drops, nicer names for pasted images, export (map PNG, KML, CSV, JSON) per photo or for
+  the library, a ground-truth panel and map line when the photo has its own GPS, GPS
+  badges, a "With GPS" filter and an accuracy card. Fixes: no focus ring around dialogs,
+  no empty inspector column while the library is empty.
 
 - **2026-10-15**: Smarter second opinion: the Claude / ChatGPT prompt walks a 12-item
   geoguessing checklist, names places it rules out and gives a reason per guess; zoomed

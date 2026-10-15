@@ -1,11 +1,13 @@
 import {
   Cpu, Keyboard, MoreHorizontal, PanelLeftClose, PanelLeftOpen, RotateCw, Search, Settings, Trash2, X,
-  RefreshCw, FolderInput, Clock,
+  RefreshCw, FolderInput, Clock, FolderOpen, Download, LocateFixed, Square, ChevronDown, ChevronRight, FileJson, FileSpreadsheet, Globe2,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { addPhotos, askDelete, dismissQueued, reanalyse, retryQueued, selectResult, visibleHistory } from '../lib/controller';
+import {
+  addFolder, addPhotos, askDelete, dismissQueued, exportLibrary, exportResult, gpsStats, reanalyse, retryQueued, selectResult, stopQueue, visibleHistory,
+} from '../lib/controller';
 import { assetUrl } from '../lib/backend';
-import { ANALYST_NAME, dayLabel, deviceLabel, flag, km, summaryTitle, timeLabel } from '../lib/format';
+import { ANALYST_NAME, dayLabel, deviceLabel, flag, km, plural, summaryTitle, timeLabel } from '../lib/format';
 import { patch, useStore, type QueueItem } from '../lib/store';
 import type { HistorySummary, Provider } from '../lib/types';
 import { cx, ConfidencePill, IconButton, Kbd, LOGO_SRC, Spinner } from './ui';
@@ -18,17 +20,25 @@ export function Library() {
   return (
     <aside className="flex h-full w-[300px] shrink-0 flex-col border-r border-border bg-surface" aria-label="Library">
       <Header />
-      <div className="px-3 pb-2">
+      <div className="flex gap-1.5 px-3 pb-2">
         <button
           type="button"
           onClick={() => void addPhotos()}
-          className="flex h-10 w-full items-center justify-between rounded-xl bg-accent px-3.5 text-[13.5px] font-semibold text-accent-fg shadow-[0_1px_0_rgb(255_255_255/0.2)_inset] transition-colors hover:bg-accent-strong active:scale-[0.99]"
+          className="flex h-10 min-w-0 flex-1 items-center justify-between rounded-xl bg-accent px-3.5 text-[13.5px] font-semibold text-accent-fg shadow-[0_1px_0_rgb(255_255_255/0.2)_inset] transition-colors hover:bg-accent-strong active:scale-[0.99]"
         >
           <span className="flex items-center gap-2"><FolderInput size={16} /> Add photos</span>
           <span className="flex items-center gap-1 opacity-75"><Kbd>Ctrl</Kbd><Kbd>O</Kbd></span>
         </button>
+        <IconButton
+          label="Add a folder of photos (Ctrl+Shift+O)"
+          onClick={() => void addFolder()}
+          className="h-10 w-10 shrink-0 rounded-xl border border-border bg-surface-2 hover:bg-surface-3"
+        >
+          <FolderOpen size={17} />
+        </IconButton>
       </div>
       <SearchBox />
+      <FilterRow />
       <List />
       <Footer />
     </aside>
@@ -42,9 +52,12 @@ function Header() {
         <img src={LOGO_SRC} alt="" className="h-[26px] w-[26px] shrink-0" />
         <span className="text-[15px] font-semibold tracking-[-0.02em]">GeoLock</span>
       </div>
-      <IconButton label="Hide library" onClick={() => patch({ sidebarOpen: false })}>
-        <PanelLeftClose size={17} />
-      </IconButton>
+      <div className="flex items-center">
+        <LibraryExport />
+        <IconButton label="Hide library" onClick={() => patch({ sidebarOpen: false })}>
+          <PanelLeftClose size={17} />
+        </IconButton>
+      </div>
     </header>
   );
 }
@@ -55,6 +68,7 @@ function Rail() {
       <img src={LOGO_SRC} alt="" className="mb-2 h-[26px] w-[26px]" />
       <IconButton label="Show library" onClick={() => patch({ sidebarOpen: true })}><PanelLeftOpen size={17} /></IconButton>
       <IconButton label="Add photos (Ctrl+O)" onClick={() => void addPhotos()}><FolderInput size={17} /></IconButton>
+      <IconButton label="Add a folder of photos (Ctrl+Shift+O)" onClick={() => void addFolder()}><FolderOpen size={17} /></IconButton>
       <div className="mt-auto flex flex-col items-center gap-1">
         <IconButton label="Keyboard shortcuts (?)" onClick={() => patch({ shortcutsOpen: true })}><Keyboard size={16} /></IconButton>
         <IconButton label="Settings (Ctrl+,)" onClick={() => patch({ settingsOpen: true })}><Settings size={17} /></IconButton>
@@ -90,9 +104,11 @@ function SearchBox() {
 function List() {
   const history = useStore((s) => s.history);
   const search = useStore((s) => s.search);
+  const libraryFilter = useStore((s) => s.libraryFilter);
   const queue = useStore((s) => s.queue);
+  const batch = useStore((s) => s.batch);
   const selectedId = useStore((s) => s.selectedId);
-  const items = useMemo(() => visibleHistory({ history, search }), [history, search]);
+  const items = useMemo(() => visibleHistory({ history, search, libraryFilter }), [history, search, libraryFilter]);
   const groups = useMemo(() => {
     const out: { label: string; items: HistorySummary[] }[] = [];
     for (const h of items) {
@@ -125,19 +141,23 @@ function List() {
 
   const queueRows = queue.length > 0 && (
     <section aria-label="Being located" className="mb-2">
-      <SectionLabel>Locating</SectionLabel>
+      <BatchHeader batch={batch} waiting={queue.filter((q) => q.status === 'queued').length} />
       <ul className="flex flex-col gap-0.5 px-2">
-        {queue.map((q) => <QueueRow key={q.id} item={q} />)}
+        {queue.filter((q) => q.status !== 'queued').concat(queue.filter((q) => q.status === 'queued').slice(0, 4)).map((q) => <QueueRow key={q.id} item={q} />)}
       </ul>
+      {queue.filter((q) => q.status === 'queued').length > 4 && (
+        <p className="px-5 pt-1 text-[11.5px] text-fg-3">and {queue.filter((q) => q.status === 'queued').length - 4} more waiting</p>
+      )}
     </section>
   );
 
   return (
     <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto pb-3">
       {queueRows}
+      <AccuracyCard items={items} />
       {items.length === 0 && queue.length === 0 && (
         <p className="px-5 pt-6 text-center text-[13px] text-fg-3">
-          {search ? <>No photos match “{search}”.</> : 'Your located photos will appear here.'}
+          {search ? <>No photos match “{search}”.</> : libraryFilter === 'gps' ? 'No photos with their own GPS yet.' : 'Your located photos will appear here.'}
         </p>
       )}
       {groups.map((g) => (
@@ -241,9 +261,7 @@ function PhotoRow({
           </div>
           <div className="mt-1.5 flex items-center gap-1.5">
             {top && <ConfidencePill label={top.label} value={top.confidence} className="h-[20px] text-[11px]" />}
-            {item.has_exif_gps && item.km_from_exif != null && (
-              <span className="whitespace-nowrap text-[11px] text-fg-3 tnum" title="Distance from the photo's own GPS">{km(item.km_from_exif)} from GPS</span>
-            )}
+            {item.has_exif_gps && <GpsBadge km={item.km_from_exif} />}
             <span className="ml-auto flex items-center gap-1">
               {item.analysts.map((p) => (
                 <span key={p} title={`${ANALYST_NAME[p]} was asked`} className={cx('flex h-[16px] w-[16px] items-center justify-center rounded-[5px] text-[9.5px] font-bold text-white', PROVIDER_CLASS[p])}>
@@ -279,12 +297,16 @@ function ItemMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onC
       window.removeEventListener('blur', onClose);
     };
   }, [onClose]);
-  const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y + 4, window.innerHeight - 110);
+  const left = Math.min(x, window.innerWidth - 230);
+  const top = Math.min(y + 4, window.innerHeight - 230);
   return (
-    <div ref={ref} role="menu" style={{ left, top }} className="pop-in fixed z-40 w-[190px] rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow)]">
+    <div ref={ref} role="menu" style={{ left, top }} className="pop-in fixed z-40 w-[220px] rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow)]">
       <MenuItem icon={<RotateCw size={14} />} onClick={() => { onClose(); void reanalyse(id); }}>Re-analyse</MenuItem>
       <MenuItem icon={<Clock size={14} />} onClick={() => { onClose(); selectResult(id, true); }}>Show in inspector</MenuItem>
+      <div className="my-1 h-px bg-border" />
+      <MenuItem icon={<Globe2 size={14} />} onClick={() => { onClose(); void exportResult(id, 'kml'); }}>Export KML (Google Earth)</MenuItem>
+      <MenuItem icon={<FileSpreadsheet size={14} />} onClick={() => { onClose(); void exportResult(id, 'csv'); }}>Export CSV</MenuItem>
+      <MenuItem icon={<FileJson size={14} />} onClick={() => { onClose(); void exportResult(id, 'json'); }}>Export JSON</MenuItem>
       <div className="my-1 h-px bg-border" />
       <MenuItem danger icon={<Trash2 size={14} />} onClick={() => { onClose(); askDelete(id); }}>Delete</MenuItem>
     </div>
@@ -324,3 +346,132 @@ function Footer() {
   );
 }
 
+
+/** How close a guess came to the photo's own GPS, coloured by band. */
+export function GpsBadge({ km: d }: { km: number | null }) {
+  const band = d == null ? null : d <= 25 ? 'high' : d <= 750 ? 'medium' : 'low';
+  return (
+    <span
+      className={cx(
+        'inline-flex h-[20px] items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[11px] tnum',
+        band === 'high' && 'border-high/40 text-high',
+        band === 'medium' && 'border-medium/40 text-medium',
+        (band === 'low' || band === null) && 'border-border text-fg-3',
+      )}
+      title={d == null ? 'The photo has its own GPS' : "Distance from the best guess to the photo's own GPS"}
+    >
+      <LocateFixed size={11} /> {d == null ? 'GPS' : `${km(d)} off`}
+    </span>
+  );
+}
+
+function FilterRow() {
+  const filter = useStore((s) => s.libraryFilter);
+  const total = useStore((s) => s.history?.length ?? 0);
+  const withGps = useStore((s) => (s.history ?? []).filter((h) => h.has_exif_gps).length);
+  if (!withGps && filter === 'all') return null;
+  const chip = (value: 'all' | 'gps', label: string, n: number) => (
+    <button
+      type="button"
+      aria-pressed={filter === value}
+      onClick={() => patch({ libraryFilter: value })}
+      className={cx(
+        'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[12px] transition-colors',
+        filter === value ? 'border-accent/50 bg-accent-soft font-medium text-fg' : 'border-border text-fg-2 hover:bg-surface-2',
+      )}
+    >
+      {label} <span className="text-fg-3 tnum">{n}</span>
+    </button>
+  );
+  return (
+    <div className="flex gap-1.5 px-3 pb-2" role="group" aria-label="Filter the library">
+      {chip('all', 'All', total)}
+      {chip('gps', 'With GPS', withGps)}
+    </div>
+  );
+}
+
+/** Accuracy against the photos' own GPS, for the photos the list shows. */
+function AccuracyCard({ items }: { items: HistorySummary[] }) {
+  const stats = useMemo(() => gpsStats(items), [items]);
+  const [open, setOpen] = useState(true);
+  if (!stats || stats.n < 2) return null;
+  return (
+    <section className="mx-3 mb-1 mt-1 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5" aria-label="Accuracy on photos with GPS">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center justify-between gap-2 text-left">
+        <span className="flex items-center gap-1.5 text-[12px] font-medium text-fg-2">
+          <LocateFixed size={13} className="shrink-0 text-accent" /> Accuracy, {plural(stats.n, 'photo')} with GPS
+        </span>
+        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[12px] text-fg-3 tnum">
+          {km(stats.median)} median {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 grid grid-cols-4 gap-1.5 fade-in">
+          {stats.within.map((b) => (
+            <div key={b.km} className="rounded-lg bg-surface px-1 py-1.5 text-center" title={`${b.label} level: ${b.count} of ${stats.n} within ${b.km.toLocaleString()} km`}>
+              <div className="text-[13px] font-semibold tnum">{Math.round(b.share * 100)}%</div>
+              <div className="whitespace-nowrap text-[10.5px] leading-tight text-fg-3">{b.label}</div>
+              <div className="whitespace-nowrap text-[10px] leading-tight text-fg-3 tnum">≤{b.km.toLocaleString()} km</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BatchHeader({ batch, waiting }: { batch: { total: number; done: number; failed: number } | null; waiting: number }) {
+  if (!batch || batch.total < 2) return <SectionLabel>Locating</SectionLabel>;
+  const finished = batch.done + batch.failed;
+  return (
+    <div className="px-5 pb-1.5 pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-3">
+          Locating {Math.min(finished + 1, batch.total)} of {batch.total}
+        </h3>
+        {waiting > 0 && (
+          <button type="button" onClick={stopQueue} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-fg-2 hover:bg-surface-3 hover:text-fg">
+            <Square size={10} fill="currentColor" /> Stop
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuemin={0} aria-valuemax={batch.total} aria-valuenow={finished}>
+        <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${(finished / batch.total) * 100}%` }} />
+      </div>
+      {batch.failed > 0 && <p className="mt-1 text-[11px] text-danger">{plural(batch.failed, 'photo')} could not be read</p>}
+    </div>
+  );
+}
+
+function LibraryExport() {
+  const [open, setOpen] = useState(false);
+  const count = useStore((s) => visibleHistory(s).length);
+  const exporting = useStore((s) => s.exporting);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('mousedown', down);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('keydown', key); };
+  }, [open]);
+  if (!count) return null;
+  const run = (f: 'csv' | 'kml' | 'json') => { setOpen(false); void exportLibrary(f); };
+  return (
+    <div ref={ref} className="relative">
+      <IconButton label="Export the library" disabled={exporting} onClick={() => setOpen((v) => !v)}>
+        {exporting ? <Spinner size={15} /> : <Download size={16} />}
+      </IconButton>
+      {open && (
+        <div role="menu" className="pop-in absolute left-0 top-9 z-40 w-[230px] rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow)]">
+          <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-fg-3">Export {count === 1 ? 'the photo shown' : `the ${count} photos shown`}</div>
+          <MenuItem icon={<FileSpreadsheet size={14} />} onClick={() => run('csv')}>CSV for Excel</MenuItem>
+          <MenuItem icon={<Globe2 size={14} />} onClick={() => run('kml')}>KML for Google Earth</MenuItem>
+          <MenuItem icon={<FileJson size={14} />} onClick={() => run('json')}>JSON (everything)</MenuItem>
+        </div>
+      )}
+    </div>
+  );
+}

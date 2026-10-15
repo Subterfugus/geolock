@@ -1,7 +1,7 @@
 import { PanelRight } from 'lucide-react';
 import { useEffect } from 'react';
-import { addPhotos, askDelete, enqueue, moveSelection } from '../lib/controller';
-import { isPhotoFile } from '../lib/files';
+import { addFolder, addPhotos, askDelete, enqueue, moveSelection } from '../lib/controller';
+import { filesFromDrop, isPhotoFile } from '../lib/files';
 import { mapHandle } from '../lib/map/mapController';
 import { getState, patch, toast, useStore } from '../lib/store';
 import { Inspector } from './Inspector';
@@ -15,13 +15,15 @@ import { IconButton } from './ui';
 export function Shell() {
   useGlobalKeys();
   useFileDrop();
-  const inspectorOpen = useStore((s) => s.inspectorOpen);
+  // With nothing in the library the inspector would only be an empty column; the welcome card says it all.
+  const inspectorOpen = useStore((s) => s.inspectorOpen && !(s.history?.length === 0 && s.queue.length === 0 && !s.selectedId));
+  const hasPhotos = useStore((s) => (s.history?.length ?? 0) > 0 || !!s.selectedId);
   return (
     <div className="flex h-full w-full overflow-hidden">
       <Library />
       <div className="relative min-w-0 flex-1">
         <MapView />
-        {!inspectorOpen && (
+        {!inspectorOpen && hasPhotos && (
           <div className="absolute right-4 top-3 z-20">
             <IconButton label="Show inspector" className="glass h-9 w-9" onClick={() => patch({ inspectorOpen: true })}>
               <PanelRight size={16} />
@@ -29,7 +31,7 @@ export function Shell() {
           </div>
         )}
       </div>
-      <Inspector />
+      {inspectorOpen && <Inspector />}
       <Toasts />
       <ConfirmDialog />
       <SettingsDialog />
@@ -49,7 +51,7 @@ function useGlobalKeys(): void {
       const s = getState();
       if (mod && !e.altKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
-        void addPhotos();
+        void (e.shiftKey ? addFolder() : addPhotos());
         return;
       }
       if (mod && !e.altKey && e.key === ',') {
@@ -121,23 +123,35 @@ function useFileDrop(): void {
       if (depth === 0) patch({ dropActive: false });
     };
     const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
+      if (!hasFiles(e) || !e.dataTransfer) return;
       e.preventDefault();
       depth = 0;
       patch({ dropActive: false });
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      const photos = files.filter(isPhotoFile);
-      if (photos.length) enqueue(photos);
-      else if (files.length) toast('error', 'That is not a photo', 'GeoLock reads JPEG, PNG, WebP, HEIC, TIFF and BMP files.');
+      // Read the drop now: the DataTransfer is emptied once this handler returns.
+      void filesFromDrop(e.dataTransfer).then((files) => {
+        const photos = files.filter(isPhotoFile);
+        if (photos.length) enqueue(photos);
+        else if (files.length) toast('error', 'That is not a photo', 'GeoLock reads JPEG, PNG, WebP, HEIC, TIFF and BMP files.');
+        else toast('info', 'No photos in what was dropped');
+      });
     };
     const onPaste = (e: ClipboardEvent) => {
       const files = Array.from(e.clipboardData?.items ?? [])
         .filter((i) => i.kind === 'file')
         .map((i) => i.getAsFile())
         .filter((f): f is File => !!f);
-      if (!files.length) return;
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (!files.length) {
+        if (!typing) toast('info', 'No image on the clipboard', 'Copy a photo (not its link), then press Ctrl+V.');
+        return;
+      }
       e.preventDefault();
-      enqueue(files);
+      // Screenshots and copied images arrive as "image.png"; give them a findable name.
+      const stamp = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }).replace(/[/:]/g, '.');
+      enqueue(files.map((f) => (/^image\.\w+$/i.test(f.name) || !f.name
+        ? new File([f], `Pasted ${stamp}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })
+        : f)));
     };
     window.addEventListener('dragenter', onEnter);
     window.addEventListener('dragover', onOver);

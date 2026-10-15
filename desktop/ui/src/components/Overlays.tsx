@@ -74,6 +74,7 @@ export function ConfirmDialog() {
 
 const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ['Ctrl', 'O'], what: 'Add photos' },
+  { keys: ['Ctrl', 'Shift', 'O'], what: 'Add a folder of photos' },
   { keys: ['Ctrl', 'V'], what: 'Paste a photo from the clipboard' },
   { keys: ['↑', '↓'], what: 'Previous or next photo in the library' },
   { keys: ['Delete'], what: 'Delete the selected photo' },
@@ -126,7 +127,7 @@ export function DropOverlay() {
           </div>
           <MapPin size={22} className="absolute -bottom-1 right-2 text-accent" fill="currentColor" fillOpacity={0.25} />
         </div>
-        <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-fg">Drop photos to locate them</h2>
+        <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-fg">Drop photos or folders to locate them</h2>
         <p className="mt-2 text-[14px] text-fg-2">Several at once are fine. They are located one by one.</p>
       </div>
     </div>

@@ -4,11 +4,13 @@ import {
   cancelSetup, clearHistory, deleteResult, getHistory, getResult, getSetup, getSettings, getStatus,
   importModels, locatePhoto, putSettings, refreshAnalysts, rerunPhoto, startSetup, type LocateOptions,
 } from './api';
-import { ApiError, currentBackend, resolveBackend } from './backend';
-import { errorText } from './format';
+import { ApiError, assetUrl, currentBackend, resolveBackend } from './backend';
+import { errorText, guessTitle, km, pct, plural } from './format';
 import { getState, patch, toast, update } from './store';
 import { applyTheme, watchSystemTheme } from './theme';
-import { pickPhotos } from './files';
+import { pickPhotoFolder, pickPhotos } from './files';
+import { saveFile, stem, toCsv, toJson, toKml, type ExportFormat } from './exporter';
+import { mapHandle } from './map/mapController';
 import type { HistorySummary, Provider, Result, Settings, Status } from './types';
 import type { QueueItem } from './store';
 
@@ -166,8 +168,8 @@ export async function loadLibrary(): Promise<void> {
 }
 
 /** The library rows as the search box leaves them. */
-export function visibleHistory(s: { history: HistorySummary[] | null; search: string }): HistorySummary[] {
-  const all = s.history ?? [];
+export function visibleHistory(s: { history: HistorySummary[] | null; search: string; libraryFilter?: 'all' | 'gps' }): HistorySummary[] {
+  const all = (s.history ?? []).filter((h) => s.libraryFilter !== 'gps' || h.has_exif_gps);
   const q = s.search.trim().toLowerCase();
   if (!q) return all;
   return all.filter((h) => {
@@ -291,12 +293,74 @@ export function enqueue(files: File[]): void {
     status: 'queued',
     error: null,
   }));
-  update((s) => ({ queue: [...s.queue, ...items] }));
+  update((s) => ({
+    queue: [...s.queue, ...items],
+    batch: s.batch
+      ? { ...s.batch, total: s.batch.total + items.length }
+      : { total: items.length, done: 0, failed: 0, ids: [] },
+  }));
   void drainQueue();
 }
 
+/** Drops the photos still waiting; the one being located finishes. */
+export function stopQueue(): void {
+  const s = getState();
+  const waiting = s.queue.filter((q) => q.status === 'queued');
+  if (!waiting.length) return;
+  waiting.forEach((q) => q.thumb && URL.revokeObjectURL(q.thumb));
+  update((st) => ({
+    queue: st.queue.filter((q) => q.status !== 'queued'),
+    batch: st.batch ? { ...st.batch, total: st.batch.total - waiting.length } : null,
+  }));
+  toast('info', `Stopped. ${plural(waiting.length, 'photo')} not located`);
+  finishBatchIfIdle();
+}
+
+/** When the queue has nothing left to do, sums up a multi-photo run once. */
+function finishBatchIfIdle(): void {
+  const s = getState();
+  if (!s.batch || s.queue.some((q) => q.status === 'queued' || q.status === 'running')) return;
+  const b = s.batch;
+  patch({ batch: null });
+  if (b.total < 2 || b.done === 0) return;
+  const rows = (s.history ?? []).filter((h) => b.ids.includes(h.id));
+  const stats = gpsStats(rows);
+  const body = stats
+    ? `${stats.n} of ${b.done} had their own GPS: median error ${km(stats.median)}, ${stats.within[1].count || 'none'} within 200 km.`
+    : b.failed ? `${plural(b.failed, 'photo')} could not be read.` : undefined;
+  toast('success', `Located ${plural(b.done, 'photo')}`, body);
+}
+
+export interface GpsStats {
+  n: number;
+  median: number;
+  mean: number;
+  within: { km: number; label: string; count: number; share: number }[];
+}
+
+/** Accuracy over the photos that carry their own GPS (the "ground truth"). */
+export function gpsStats(rows: HistorySummary[]): GpsStats | null {
+  const errs = rows.map((h) => h.km_from_exif).filter((x): x is number => x != null && Number.isFinite(x)).sort((a, b) => a - b);
+  if (!errs.length) return null;
+  const n = errs.length;
+  const median = n % 2 ? errs[(n - 1) / 2] : (errs[n / 2 - 1] + errs[n / 2]) / 2;
+  const bands = [[25, 'Street'], [200, 'City'], [750, 'Region'], [2500, 'Country']] as const;
+  return {
+    n,
+    median,
+    mean: errs.reduce((a, b) => a + b, 0) / n,
+    within: bands.map(([k, label]) => {
+      const count = errs.filter((e) => e <= k).length;
+      return { km: k, label, count, share: count / n };
+    }),
+  };
+}
+
 export function retryQueued(id: string): void {
-  update((s) => ({ queue: s.queue.map((q) => (q.id === id ? { ...q, status: 'queued', error: null } : q)) }));
+  update((s) => ({
+    queue: s.queue.map((q) => (q.id === id ? { ...q, status: 'queued', error: null } : q)),
+    batch: s.batch ?? { total: 1, done: 0, failed: 0, ids: [] },
+  }));
   void drainQueue();
 }
 
@@ -328,6 +392,7 @@ async function drainQueue(): Promise<void> {
           results: { ...st.results, [r.id]: r },
           history: upsertHistory(st.history, summarize(r)),
           queue: st.queue.filter((q) => q.id !== next.id),
+          batch: st.batch ? { ...st.batch, done: st.batch.done + 1, ids: [...st.batch.ids, r.id] } : null,
         }));
         if (next.thumb) URL.revokeObjectURL(next.thumb);
         // Only jump to the new photo if the user has not picked something else meanwhile.
@@ -336,12 +401,14 @@ async function drainQueue(): Promise<void> {
       } catch (e) {
         update((st) => ({
           queue: st.queue.map((q) => (q.id === next.id ? { ...q, status: 'error', error: errorText(e) } : q)),
+          batch: st.batch ? { ...st.batch, failed: st.batch.failed + 1 } : null,
         }));
         if (e instanceof ApiError && e.network) break;
       }
     }
   } finally {
     draining = false;
+    finishBatchIfIdle();
   }
 }
 
@@ -437,6 +504,86 @@ export async function addPhotos(): Promise<void> {
   } catch (e) {
     toast('error', "Couldn't open the photos", errorText(e));
   }
+}
+
+/** Opens a folder picker and queues every photo in it, subfolders included. */
+export async function addFolder(): Promise<void> {
+  try {
+    const files = await pickPhotoFolder();
+    if (!files) return;
+    if (!files.length) {
+      toast('info', 'No photos in that folder', 'GeoLock reads JPEG, PNG, WebP, HEIC, TIFF and BMP files.');
+      return;
+    }
+    enqueue(files);
+    if (files.length > 1) toast('info', `Locating ${plural(files.length, 'photo')}`, 'They are done one at a time. You can keep browsing meanwhile.');
+  } catch (e) {
+    toast('error', "Couldn't open the folder", errorText(e));
+  }
+}
+
+// ------------------------------------------------------------------ export
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+async function withExport(what: string, fn: () => Promise<string | null>): Promise<void> {
+  if (getState().exporting) return;
+  patch({ exporting: true });
+  try {
+    const where = await fn();
+    if (where) toast('success', `${what} exported`, where);
+  } catch (e) {
+    toast('error', `Couldn't export ${what.toLowerCase()}`, errorText(e));
+  } finally {
+    patch({ exporting: false });
+  }
+}
+
+async function loadImage(url: string): Promise<ImageBitmap | null> {
+  try {
+    const res = await fetch(assetUrl(url));
+    if (!res.ok) return null;
+    return await createImageBitmap(await res.blob());
+  } catch {
+    return null;
+  }
+}
+
+/** Exports one photo's result. PNG is the map as it is on screen, with the pins and a caption. */
+export function exportResult(id: string, format: ExportFormat): Promise<void> {
+  return withExport(format === 'png' ? 'Map image' : 'Result', async () => {
+    const r = getState().results[id] ?? (await fetchResult(id));
+    if (!r) return null;
+    const base = `${stem(r.name)}-geolock`;
+    if (format === 'json') return saveFile(`${base}.json`, format, toJson([r]));
+    if (format === 'csv') return saveFile(`${base}.csv`, format, toCsv([r]));
+    if (format === 'kml') return saveFile(`${base}.kml`, format, toKml([r], `GeoLock: ${r.name}`));
+    const map = mapHandle.current;
+    if (!map || getState().selectedId !== id) throw new Error('Open the photo on the map first.');
+    const top = r.guesses[getState().selectedGuess] ?? r.guesses[0];
+    const lines: string[] = [];
+    if (top) lines.push(`Best guess: ${guessTitle(top).main}${top.country ? `, ${top.country}` : ''} · ${pct(top.confidence)} · within ±${Math.round(top.radius_km)} km`);
+    if (top?.km_from_exif != null) lines.push(`The photo's own GPS (★) is ${km(top.km_from_exif)} from this guess.`);
+    const blob = await map.snapshot({ title: r.name, lines }, await loadImage(r.image_url));
+    return saveFile(`${base}-map.png`, 'png', blob);
+  });
+}
+
+/** Exports the photos the library shows right now (search and filter applied). */
+export function exportLibrary(format: Exclude<ExportFormat, 'png'>): Promise<void> {
+  return withExport('Library', async () => {
+    const rows = visibleHistory(getState());
+    if (!rows.length) throw new Error('There are no photos to export.');
+    const results: Result[] = [];
+    for (const h of rows) {
+      const r = getState().results[h.id] ?? (await getResult(h.id).catch(() => null));
+      if (r) results.push(r);
+    }
+    const base = `geolock-${plural(results.length, 'photo').replace(' ', '-')}-${today()}`;
+    if (format === 'json') return saveFile(`${base}.json`, format, toJson(results));
+    if (format === 'csv') return saveFile(`${base}.csv`, format, toCsv(results));
+    return saveFile(`${base}.kml`, format, toKml(results, `GeoLock: ${plural(results.length, 'photo')}`));
+  });
 }
 
 /** Asks before deleting one photo. Used by the menu, the inspector and the Delete key. */

@@ -50,8 +50,14 @@ export interface AppState {
   /** When the user last picked a photo by hand; auto-select after a queued job yields to it. */
   userPickedAt: number;
   queue: QueueItem[];
+  /** Progress of the current run of queued photos; null when the queue is idle. */
+  batch: { total: number; done: number; failed: number; ids: string[] } | null;
   asking: Record<string, Provider | undefined>;
   search: string;
+  /** Library filter: every photo, or only those with their own GPS. */
+  libraryFilter: 'all' | 'gps';
+  /** An export is being written. */
+  exporting: boolean;
   sidebarOpen: boolean;
   inspectorOpen: boolean;
   settingsOpen: boolean;
@@ -83,8 +89,11 @@ let state: AppState = {
   selectedGuess: 0,
   userPickedAt: 0,
   queue: [],
+  batch: null,
   asking: {},
   search: '',
+  libraryFilter: 'all',
+  exporting: false,
   sidebarOpen: !narrow,
   inspectorOpen: true,
   settingsOpen: false,

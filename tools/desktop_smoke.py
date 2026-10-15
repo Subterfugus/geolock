@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -87,6 +88,21 @@ def run_locate(port):
     assert call(port, res["thumb_url"])[:2] == b"\xff\xd8"
 
 
+def run_save(port, folder):
+    """The UI's Export writes through /api/save to the path picked in the Save dialog."""
+    target = folder / "smoke-export.csv"
+    body, ctype = multipart({"path": str(target)}, "smoke-export.csv", b"name,lat\r\nsmoke.jpg,48.8\r\n")
+    res = call(port, "/api/save", "POST", body, ctype)
+    assert Path(res["path"]) == target and target.read_bytes().startswith(b"name,lat"), res
+    body, ctype = multipart({"path": str(folder / "evil.exe")}, "evil.exe", b"MZ")
+    try:
+        call(port, "/api/save", "POST", body, ctype)
+        raise SystemExit("/api/save accepted an .exe")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    print(f"save: wrote {res['bytes']} bytes to {target.name}, refused .exe", flush=True)
+
+
 def wait_up(port, timeout=300):
     t0 = time.time()
     while True:
@@ -135,6 +151,7 @@ def main():
         assert st["state"] == "needs_setup", st
         run_setup(port)
         run_locate(port)
+        run_save(port, data_dir)
         ok = True
     finally:
         proc.stdin.close()  # what happens when the app quits or crashes

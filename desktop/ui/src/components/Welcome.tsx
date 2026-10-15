@@ -1,5 +1,5 @@
-import { FolderInput, ImagePlus, MapPin } from 'lucide-react';
-import { addPhotos } from '../lib/controller';
+import { FolderInput, FolderOpen, ImagePlus, MapPin } from 'lucide-react';
+import { addFolder, addPhotos } from '../lib/controller';
 import { deviceLabel } from '../lib/format';
 import { useStore } from '../lib/store';
 import { Button, Kbd } from './ui';
@@ -20,11 +20,14 @@ export function Welcome() {
         </div>
         <h2 className="text-[20px] font-semibold tracking-[-0.02em]">Where was this photo taken?</h2>
         <p className="mt-2 max-w-[360px] text-[14px] leading-relaxed text-fg-2">
-          Drop a photo anywhere, paste one, or press <span className="inline-flex items-center gap-1 align-middle"><Kbd>Ctrl</Kbd><Kbd>O</Kbd></span> to choose files.
+          Drop photos or a whole folder anywhere, paste one with <span className="inline-flex items-center gap-1 align-middle"><Kbd>Ctrl</Kbd><Kbd>V</Kbd></span>, or press <span className="inline-flex items-center gap-1 align-middle"><Kbd>Ctrl</Kbd><Kbd>O</Kbd></span> to choose files.
         </p>
         <div className="mt-6 flex items-center gap-2">
           <Button variant="primary" size="lg" onClick={() => void addPhotos()}>
             <FolderInput size={16} /> Add photos
+          </Button>
+          <Button size="lg" onClick={() => void addFolder()}>
+            <FolderOpen size={16} /> Add a folder
           </Button>
         </div>
         <p className="mt-5 text-[12px] text-fg-3">

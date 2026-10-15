@@ -225,6 +225,18 @@ def test_settings_and_session_only_history(backend):
     assert client.post("/api/locate", files={"file": ("x.jpg", b"not an image", "image/jpeg")}).status_code == 415
 
 
+def test_save_export(backend, tmp_path):
+    _, client = backend
+    target = tmp_path / "Paris result.kml"
+    r = client.post("/api/save", data={"path": str(target)}, files={"file": ("x.kml", b"<kml/>", "text/xml")})
+    assert r.status_code == 200, r.text
+    assert r.json()["bytes"] == 6 and target.read_bytes() == b"<kml/>"
+    for bad in ("relative.csv", str(tmp_path / "a.exe"), str(tmp_path / "missing" / "a.csv")):
+        r = client.post("/api/save", data={"path": bad}, files={"file": ("x", b"1", "text/plain")})
+        assert r.status_code == 400, bad
+    assert not (tmp_path / "a.exe").exists()
+
+
 def test_download_resumes(backend, served):
     b, client = backend
     _, path, hits = served

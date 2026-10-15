@@ -1,13 +1,13 @@
 import { LngLatBounds, Map as MapLibreMap, Marker } from 'maplibre-gl';
-import type { FeatureCollection, Feature, Point, Polygon } from 'geojson';
+import type { FeatureCollection, Feature, MultiLineString, Point, Polygon } from 'geojson';
 import type { StyleSpecification } from 'maplibre-gl';
 import { dataUrl } from '../backend';
 import { guessTitle } from '../format';
-import { geodesicCircle } from '../geo';
+import { geodesicCircle, greatCircle } from '../geo';
 import type { Guess, MapStyleKind, Result } from '../types';
 import { FONT_STACK, PALETTE, offlineStyle, onlineStyle, type Theme } from './mapStyles';
 
-type Fc = FeatureCollection<Point | Polygon>;
+type Fc = FeatureCollection<Point | Polygon | MultiLineString>;
 
 const CONF_COLOR: Record<Theme, Record<Guess['label'], string>> = {
   dark: { high: '#34d399', medium: '#fbbf24', low: '#8ea3c7' },
@@ -60,6 +60,8 @@ function loadAdmin1(): Promise<void> {
   return admin1Promise;
 }
 
+const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888888';
+
 const EMPTY: Fc = { type: 'FeatureCollection', features: [] };
 
 export interface GeoMapCallbacks {
@@ -78,6 +80,7 @@ export class GeoMap {
   private pins: Marker[] = [];
   private heatFc: Fc = EMPTY;
   private uncFc: Fc = EMPTY;
+  private truthFc: Fc = EMPTY;
   private labelKey = -1;
   private destroyed = false;
 
@@ -97,6 +100,8 @@ export class GeoMap {
       pitchWithRotate: false,
       touchPitch: false,
       fadeDuration: 150,
+      // Lets "Export map image" read the canvas back.
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
     this.map.on('style.load', () => this.onStyleLoad());
     this.map.on('zoom', () => this.onZoom());
@@ -229,11 +234,20 @@ export class GeoMap {
         },
       });
     }
+    if (!map.getSource('truth')) {
+      map.addSource('truth', { type: 'geojson', data: this.truthFc });
+      map.addLayer({
+        id: 'truth-line', type: 'line', source: 'truth',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-opacity': 0.9, 'line-dasharray': [1.5, 2] },
+      });
+    }
     this.pushData();
   }
 
   private pushData(): void {
     if (!this.styleReady) return;
+    (this.map.getSource('truth') as { setData?: (d: Fc) => void } | undefined)?.setData?.(this.truthFc);
     (this.map.getSource('heat') as { setData?: (d: Fc) => void } | undefined)?.setData?.(this.heatFc);
     (this.map.getSource('uncertainty') as { setData?: (d: Fc) => void } | undefined)?.setData?.(this.uncFc);
   }
@@ -254,6 +268,13 @@ export class GeoMap {
         geometry: { type: 'Polygon', coordinates: [geodesicCircle(g.lat, g.lon, g.radius_km)] },
       })),
     };
+    // A dashed line from the selected guess to the photo's own GPS: how far off it is.
+    const g = r?.guesses[this.selected] ?? r?.guesses[0];
+    const t = r?.exif_gps;
+    this.truthFc = g && t ? {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: greatCircle(g.lat, g.lon, t.lat, t.lon) } }],
+    } : EMPTY;
   }
 
   /** Shows a result: heat, uncertainty circles and the pins. Does not move the camera. */
@@ -367,6 +388,105 @@ export class GeoMap {
       maxZoom: 5.4,
       duration: 900,
       essential: true,
+    });
+  }
+
+  // ----------------------------------------------------------- export
+
+  /**
+   * The current view as a PNG: basemap, heat and circles from the WebGL canvas, then the pins
+   * (DOM markers, so redrawn here), an optional photo inset and a caption strip.
+   */
+  async snapshot(caption: { title: string; lines: string[] }, photo: ImageBitmap | null): Promise<Blob> {
+    const map = this.map;
+    await new Promise<void>((resolve) => {
+      map.once('render', () => resolve());
+      map.triggerRepaint();
+    });
+    const src = map.getCanvas();
+    const dpr = src.width / Math.max(1, src.clientWidth);
+    const w = src.clientWidth;
+    const capH = 30 + 18 * caption.lines.length;
+    const h = src.clientHeight + capH;
+    const out = document.createElement('canvas');
+    out.width = Math.round(w * dpr);
+    out.height = Math.round(h * dpr);
+    const ctx = out.getContext('2d');
+    if (!ctx) throw new Error('No 2D canvas');
+    ctx.scale(dpr, dpr);
+    ctx.drawImage(src, 0, 0, w, src.clientHeight);
+    const dark = this.theme === 'dark';
+    const col = CONF_COLOR[this.theme];
+    const font = (px: number, weight = 600) => `${weight} ${px}px "Inter Variable", "Segoe UI", system-ui, sans-serif`;
+    const r = this.result;
+    const disc = (x: number, y: number, rad: number, fill: string, text: string, ring = '#ffffff') => {
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = ring;
+      ctx.stroke();
+      ctx.fillStyle = dark ? '#0b0f14' : '#ffffff';
+      ctx.font = font(rad > 14 ? 13 : 11, 700);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, x, y + 0.5);
+    };
+    if (r) {
+      if (r.exif_gps) {
+        const p = map.project([r.exif_gps.lon, r.exif_gps.lat]);
+        disc(p.x, p.y, 11, '#f59e0b', '★', dark ? '#0b0f14' : '#ffffff');
+      }
+      for (const a of r.analysts) {
+        if (!a.ok) continue;
+        a.guesses.forEach((g, gi) => {
+          const p = map.project([g.lon, g.lat]);
+          disc(p.x, p.y, 10, cssVar(a.provider === 'claude' ? '--claude' : '--chatgpt'), `${a.provider === 'claude' ? 'C' : 'G'}${gi ? gi + 1 : ''}`);
+        });
+      }
+      for (let i = r.guesses.length - 1; i >= 0; i--) {
+        const g = r.guesses[i];
+        const p = map.project([g.lon, g.lat]);
+        disc(p.x, p.y, i === 0 ? 16 : 14, col[g.label], String(i + 1), i === this.selected ? '#3b82f6' : '#ffffff');
+      }
+    }
+    if (photo) {
+      const maxW = Math.min(220, w * 0.28);
+      const scale = Math.min(maxW / photo.width, (src.clientHeight * 0.4) / photo.height);
+      const pw = photo.width * scale;
+      const ph = photo.height * scale;
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(12, 12, pw + 6, ph + 6);
+      ctx.restore();
+      ctx.drawImage(photo, 15, 15, pw, ph);
+    }
+    // Caption strip
+    const y0 = src.clientHeight;
+    ctx.fillStyle = dark ? '#11161d' : '#ffffff';
+    ctx.fillRect(0, y0, w, capH);
+    ctx.fillStyle = dark ? '#2a313c' : '#e3e6ea';
+    ctx.fillRect(0, y0, w, 1);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = dark ? '#e8edf3' : '#111827';
+    ctx.font = font(14, 650);
+    ctx.fillText(caption.title, 14, y0 + 21);
+    ctx.font = font(12, 450);
+    ctx.fillStyle = dark ? '#9ba6b8' : '#4b5563';
+    caption.lines.forEach((l, i) => ctx.fillText(l, 14, y0 + 21 + 18 * (i + 1)));
+    ctx.textAlign = 'right';
+    ctx.fillStyle = dark ? '#6b7686' : '#9aa3af';
+    ctx.font = font(11, 500);
+    ctx.fillText('GeoLock', w - 14, y0 + 21);
+    return new Promise<Blob>((resolve, reject) => {
+      out.toBlob((b) => (b ? resolve(b) : reject(new Error('The map could not be saved as an image.'))), 'image/png');
     });
   }
 
