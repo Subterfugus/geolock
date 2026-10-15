@@ -174,8 +174,30 @@ def test_photo_is_resized_and_has_no_exif():
     assert max(out.size) == analyst.MAX_SIDE and not out.getexif()
 
 
+def _isolate_home(tmp_path, monkeypatch):
+    for var in ("HOME", "USERPROFILE", "APPDATA"):
+        monkeypatch.setenv(var, str(tmp_path))
+
+
+def test_finds_claude_in_local_bin_when_not_on_path(tmp_path, monkeypatch):
+    # Claude Code's native Windows installer puts claude.exe in ~/.local/bin and leaves
+    # PATH alone, so the app must look there too (seen on the Yoga, 2026-10-15).
+    _isolate_home(tmp_path, monkeypatch)
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    answer = f"ANSWER = {json.dumps(ANSWER)!r}\nANSWER = __import__('json').loads(ANSWER)\n"
+    _fake(bin_dir, "claude", answer + FAKE_CLAUDE)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    found = analyst._find_cli("claude")
+    assert found and os.path.dirname(found) == str(bin_dir)
+    st = analyst.detect(refresh=True)
+    assert st["claude"]["available"] and st["claude"]["via"] == "claude-code"
+    analyst._detect_cache["value"] = None
+
+
 def test_missing_cli_reports_why(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
+    _isolate_home(tmp_path, monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     st = analyst.detect(refresh=True)
     assert not st["claude"]["available"] and "claude auth login" in st["claude"]["detail"]
