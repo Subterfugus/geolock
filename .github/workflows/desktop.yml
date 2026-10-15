@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: geolock/desktop/bundled
-          key: assets-v1-${{ hashFiles('geolock/prompts.py', 'geolock/data/countries.geojson', 'tools/build_app_assets.py', 'geolock/desktop/modelsetup.py', 'geolock/setup_models.py', 'geolock/config.py') }}
+          key: assets-v2-${{ hashFiles('geolock/prompts.py', 'tools/build_postcodes.py', 'geolock/data/countries.geojson', 'tools/build_app_assets.py', 'geolock/desktop/modelsetup.py', 'geolock/setup_models.py', 'geolock/config.py') }}
       - uses: actions/setup-python@v5
         if: steps.cache.outputs.cache-hit != 'true'
         with:
@@ -44,6 +44,9 @@ jobs:
           pip install transformers huggingface_hub openvino numpy pillow shapely scipy
           pip install geoclip --no-deps
           python tools/build_app_assets.py
+          # GeoNames postcodes (CC BY 4.0) for the address reader
+          curl -fsSL -o /tmp/allCountries.zip https://download.geonames.org/export/zip/allCountries.zip
+          python tools/build_postcodes.py /tmp/allCountries.zip geolock/desktop/bundled/postcodes.npz
       - run: ls -la geolock/desktop/bundled && cat geolock/desktop/bundled/assets.json
       - uses: actions/upload-artifact@v4
         with:

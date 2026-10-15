@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from .. import __version__
 from ..geodata import DATA
 from .library import Library, Settings, write_export
-from .modelsetup import ModelSetup, models_ready
+from .modelsetup import ModelSetup, models_ready, refresh_bundled
 from .updater import Updater
 
 ORIGINS = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost",
@@ -46,6 +46,7 @@ class Backend:
 
     def _default_factory(self, device):
         from ..engine import Geolocator
+        refresh_bundled(self.models_dir)
         return Geolocator(self.models_dir, device=device)
 
     def start(self):

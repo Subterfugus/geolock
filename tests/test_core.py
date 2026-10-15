@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 from geolock.clues import Clue
-from geolock.engine import make_crops
+from geolock.engine import make_crops, zoom_crops
 from geolock.exif import exif_clues
 from geolock.geodata import GeoData, haversine_km, weighted_center
 from geolock.locenc import equal_earth
@@ -43,6 +43,14 @@ def test_crops_shape_any_aspect():
     for size in [(1200, 800), (600, 1400), (224, 224)]:
         x = make_crops(Image.new("RGB", size, (10, 200, 30)))
         assert x.shape == (4, 3, 224, 224) and x.dtype == np.float32
+
+
+def test_zoom_crops_cover_the_four_quarters():
+    im = Image.new("RGB", (1200, 800), (0, 0, 0))
+    im.paste((255, 0, 0), (600, 400, 1200, 800))  # bottom-right quarter red
+    x = zoom_crops(im)
+    assert x.shape == (4, 3, 224, 224) and x.dtype == np.float32
+    assert x[3, 0].mean() > x[0, 0].mean() + 1  # the last crop is the red quarter
 
 
 def test_clue_likelihood_prefers_listed_countries():

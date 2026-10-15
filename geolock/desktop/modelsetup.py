@@ -36,6 +36,18 @@ def bundled_dir():
     return Path(__file__).resolve().parent / "bundled"
 
 
+def refresh_bundled(models_dir):
+    """Bring the app-owned calibration up to this version's (an update can carry
+    re-fitted settings); models set up by an older version keep their old copy otherwise."""
+    src, dst = bundled_dir() / "calibration.json", Path(models_dir) / "calibration.json"
+    try:
+        if src.exists() and Path(models_dir).exists() and (
+                not dst.exists() or dst.read_bytes() != src.read_bytes()):
+            shutil.copy2(src, dst)
+    except OSError:
+        pass
+
+
 def load_assets():
     p = bundled_dir() / "assets.json"
     return json.loads(p.read_text()) if p.exists() else {}

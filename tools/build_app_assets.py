@@ -33,8 +33,10 @@ from geolock.setup_models import geoclip_dir, load_clip, text_embeddings  # noqa
 
 ONNX_REPO = "Xenova/clip-vit-large-patch14"
 ONNX_FILES = ["onnx/vision_model_fp16.onnx", "onnx/vision_model.onnx"]  # first one found wins
-# Fitted with `geolock eval --fit` on 295 Commons photos (info.md, 2026-10-14).
-CALIBRATION = {"temperature": 1.5, "country_weight": 0.5, "analyst_weight": 0.75}
+# Fitted with `geolock eval --fit` on half of 294 Commons photos and checked on the other
+# half (info.md, 2026-10-15): zoomed crops on, scene clues trusted twice as much.
+CALIBRATION = {"temperature": 1.5, "country_weight": 1.0, "analyst_weight": 0.75,
+               "clue_scales": {"scene": 2.0, "text": 1.0, "time": 1.0}, "extra_crops": True}
 
 
 def log(msg):
@@ -97,8 +99,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=ROOT / "geolock" / "desktop" / "bundled")
     ap.add_argument("--work", type=Path, default=ROOT / "build" / "assets-work")
+    ap.add_argument("--calibration-only", action="store_true",
+                    help="only (re)write calibration.json, e.g. into assets from an earlier build")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
+    if a.calibration_only:
+        (a.out / "calibration.json").write_text(json.dumps(CALIBRATION, indent=2))
+        log("calibration.json written")
+        return
     a.work.mkdir(parents=True, exist_ok=True)
 
     geoclip_assets(a.out)

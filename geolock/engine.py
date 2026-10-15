@@ -12,6 +12,7 @@ Pipeline
 """
 import io
 import json
+import os
 import time
 from functools import cached_property
 from pathlib import Path
@@ -28,6 +29,7 @@ except ImportError:
 from . import prompts
 from .clues import Clue
 from .config import CROPS, DEVICE, MODELS_DIR
+from .addresses import address_clues
 from .countrymeta import SCRIPT_COUNTRIES
 from .devices import VisionRunner, benchmark, is_intel_gpu
 from .exif import exif_clues, read_exif
@@ -63,6 +65,23 @@ def make_crops(im, size=224):
     return ((arr - MEAN) / STD).transpose(0, 3, 1, 2).copy()
 
 
+def zoom_crops(im, size=224):
+    """A 2x2 grid of zoomed crops (each quarter of the photo, its centre square), so CLIP
+    sees signs, poles and plants at about twice the detail of make_crops. Same batch size,
+    so it runs on the NPU too. Not mirrored: that would flip the driving side and text."""
+    w, h = im.size
+    crops = []
+    for y in (0, h // 2):
+        for x in (0, w // 2):
+            q = im.crop((x, y, x + w // 2, y + h // 2))
+            r = _resize_short(q, size)
+            rw, rh = r.size
+            crops.append(r.crop(((rw - size) // 2, (rh - size) // 2, (rw - size) // 2 + size,
+                                 (rh - size) // 2 + size)))
+    arr = np.stack([np.asarray(c.convert("RGB"), dtype=np.float32) / 255.0 for c in crops[:CROPS]])
+    return ((arr - MEAN) / STD).transpose(0, 3, 1, 2).copy()
+
+
 def _softmax(x):
     x = x - x.max()
     e = np.exp(x)
@@ -89,6 +108,12 @@ class Geolocator:
         # Share of the final answer given to Claude / ChatGPT when asked (their stated
         # confidences are honoured within that share).
         self.analyst_weight = float(self.calibration.get("analyst_weight", 0.75))
+        # Per-group clue-strength scales fitted on real photos ({} = as hand-set).
+        self.clue_scales = dict(self.calibration.get("clue_scales") or {})
+        # Look at more of the photo: a second CLIP batch of zoomed crops (about +100 ms on
+        # the Arc GPU). GEOLOCK_EXTRA_CROPS=0/1 overrides the calibration, for measuring.
+        env = os.environ.get("GEOLOCK_EXTRA_CROPS")
+        self.extra_crops = (env == "1") if env in ("0", "1") else bool(self.calibration.get("extra_crops", False))
         self.cluster_km = cluster_km
         self.warmup_ms = None
         self.geo = GeoData()
@@ -160,7 +185,10 @@ class Geolocator:
 
     # --------------------------------------------------------------- helpers
     def embed(self, im):
-        return self.runner(make_crops(im))  # (CROPS, 768), falls back to the CPU on failure
+        e = self.runner(make_crops(im))  # (CROPS, 768), falls back to the CPU on failure
+        if self.extra_crops and min(im.size) >= 448:  # zoom in only where there is detail
+            e = np.concatenate([e, self.runner(zoom_crops(im))])
+        return e
 
     def geoclip_query(self, img_emb):
         w1, b1, w2, b2 = self.mlp
@@ -220,7 +248,8 @@ class Geolocator:
             if key == "script":
                 countries = SCRIPT_COUNTRIES.get(opt["label"])
                 if countries and p > 0.3:
-                    clues.append(Clue(kind="script", title=f"Signs appear to use {opt['label']} script",
+                    clues.append(Clue(kind="script", group="scene",
+                                      title=f"Signs appear to use {opt['label']} script",
                                       detail=f"CLIP script detector: {p:.0%}.",
                                       strength=min(0.75, (p - chance) * 0.9), countries=countries,
                                       background=0.08))
@@ -239,6 +268,7 @@ class Geolocator:
                 hints = dict(zip(labels, attrs["script"].tolist()))
                 ocr_lines = self.reader.read(im, script_hints=hints)
                 clues += self.reader.clues(ocr_lines)
+                clues += address_clues(ocr_lines, self.models_dir)  # plates, postcodes
             except Exception as e:
                 clues.append(Clue(kind="ocr", title="Text reading failed", detail=str(e)[:200]))
             timings["ocr_ms"] = round((time.perf_counter() - t) * 1000)
@@ -268,21 +298,30 @@ class Geolocator:
         return {"q": q, "p_country_clip": p_country_clip, "clues": clues, "scene": scene,
                 "ocr": ocr_lines, "vlm_raw": vlm_raw}
 
-    def posterior(self, q, p_country_clip, clues, temperature=None, country_weight=None):
-        """Fuse GeoCLIP's visual prior with every clue. Returns (log_post, log_geo, country_ll)."""
+    def posterior(self, q, p_country_clip, clues, temperature=None, country_weight=None,
+                  scales=None, sims=None):
+        """Fuse GeoCLIP's visual prior with every clue. Returns (log_post, log_geo, country_ll).
+        scales: clue-strength scale per group (default: the fitted ones). sims: precomputed
+        gallery similarities (gal_feats @ q), so fitting can skip the big product."""
         temperature = self.temperature if temperature is None else temperature
         country_weight = self.country_weight if country_weight is None else country_weight
-        log_geo = _log_softmax(self.geo_scale * (self.gal_feats @ q) / temperature)
+        scales = self.clue_scales if scales is None else scales
+        sims = self.gal_feats @ q if sims is None else sims
+        log_geo = _log_softmax(self.geo_scale * sims / temperature)
         country_ll = country_weight * np.log(p_country_clip + 1e-9)
         for c in clues:
-            ll = c.country_loglik(self.geo.country_codes)
+            ll = c.country_loglik(self.geo.country_codes, c.scaled(scales))
             if ll is not None:
                 country_ll = country_ll + ll
         ll_pad = np.append(country_ll, np.median(country_ll))  # index -1 = open water
         log_post = log_geo + ll_pad[self.gal_country]
         for c in clues:
-            if c.point_fn is not None and c.strength > 0:
-                log_post = log_post + np.log((1 - c.strength) + c.strength * c.point_fn(self.gps[:, 0], self.gps[:, 1]))
+            s = c.scaled(scales)
+            if c.point_fn is not None and s > 0:
+                pf = getattr(c, "_gallery_pf", None)
+                if pf is None:  # same gallery every time: compute once per clue
+                    pf = c._gallery_pf = c.point_fn(self.gps[:, 0], self.gps[:, 1])
+                log_post = log_post + np.log((1 - s) + s * pf)
         return log_post - np.log(np.exp(log_post - log_post.max()).sum()) - log_post.max(), log_geo, country_ll
 
     def briefing(self, ev, meta):
@@ -539,8 +578,9 @@ class Geolocator:
         ll_pad = np.append(country_ll, country_ll.min())
         score = score + ll_pad[ci]
         for c in clues:
-            if c.point_fn is not None and c.strength > 0:
-                score += np.log((1 - c.strength) + c.strength * c.point_fn(cand_lat, cand_lon))
+            s = c.scaled(self.clue_scales)
+            if c.point_fn is not None and s > 0:
+                score += np.log((1 - s) + s * c.point_fn(cand_lat, cand_lon))
         w = _softmax(score)
         if frac > 0 and spots:  # same mixture as mix_analysts, on these candidates
             b = sum(p * np.exp(-0.5 * (haversine_km(la, lo, cand_lat, cand_lon) / max(r, 3.0)) ** 2)
