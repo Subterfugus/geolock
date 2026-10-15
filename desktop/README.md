@@ -90,7 +90,7 @@ Two configs:
   `--config`. Only the release build needs it. Run the freeze step first, so
   `backend-dist/geolock-backend/` exists.
 
-The installer is per-user (`%LOCALAPPDATA%\Programs`, no admin prompt). WebView2 is installed
+The installer is per-user (`%LOCALAPPDATA%\GeoLock`, no admin prompt). WebView2 is installed
 by a bootstrapper if it is missing.
 
 CI: `.github/workflows/desktop.yml` freezes the backend, runs the smoke test, runs the commands

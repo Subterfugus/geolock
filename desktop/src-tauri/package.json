@@ -1,6 +1,6 @@
 {
   "name": "geolock-desktop-shell",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "GeoLock desktop shell (Tauri 2). Run from this folder.",
   "scripts": {

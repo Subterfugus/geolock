@@ -22,7 +22,7 @@ confidence and the clues for each guess.
 | Deep analysis with a local vision-language model | Built but **not part of the plan** (Brady, 2026-10-14): the Claude / ChatGPT second opinion covers this; never run |
 | Second opinion from Claude / ChatGPT (own subscription, via Claude Code / Codex CLI) | Built. **Claude path run for real** (Claude Code 2.1, ~5-10 s per photo); Codex path tested against a fake CLI only (no ChatGPT login on the build machine). 2026-10-15: geoguessing checklist prompt and zoomed sign crops (fake CLIs only so far). Accuracy gain not yet measured |
 | Map web app (offline basemap, heatmap, guesses, clues, light/dark, mobile) | Built; checked in a headless browser |
-| **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Released as v0.3.0 on GitHub Releases. Every main build installs the real installer on a Windows CI runner, runs first-run setup and a locate, and screenshots the window (pushed to the `ci-screenshots` branch). Not yet run on the laptop |
+| **Windows desktop app** (Tauri window, installer, first-run download, library, settings) | Released as v0.3.0 on GitHub Releases. Every main build installs the real installer on a Windows CI runner, runs first-run setup and a locate, and screenshots the window (pushed to the `ci-screenshots` branch). **Installed and run on the Yoga laptop** (2026-10-15, see "Results on the Yoga laptop") |
 | Windows setup script and launcher | **Run on real Windows 11** (desktop PC, 2026-10-14): worked first try after two small fixes (see changelog) |
 | Accuracy on real photos | **Measured** on 295 Wikimedia Commons photos from 202 countries: 26 % within 200 km, 67 % within 2500 km, country right 39 % (see "Test sets and results"); also 151 hard iNaturalist nature photos |
 | Test set download | `geolock testset <folder>`: ~300 Wikimedia Commons photos, world-spread, licences recorded. **Run on Windows**: 295 photos in about 45 minutes |
@@ -273,6 +273,25 @@ Set `GEOLOCK_MODELS` to keep them elsewhere and `GEOLOCK_DEVICE` to force a devi
 
 ## Test sets and results
 
+**Results on the Yoga laptop (2026-10-15, installer v0.3.0, no Claude/ChatGPT)**
+
+Lenovo Yoga 9 2-in-1 14ILL10 (83LC), Core Ultra 7 258V, Arc 140V, AI Boost NPU, 32 GB,
+Windows 11 Home. Silent per-user install 36 s; first-run setup (609 MB download at
+~59 MB/s, convert, gallery, load) about 1.5 min. Auto picked the GPU with no fallback
+(compile 3.7 s). Cold restart to ready: 9 s.
+
+| Device | Compile | First run | CLIP (4 crops, median) |
+|---|---|---|---|
+| Arc 140V GPU | 0.8 s (cached) | 112 ms | **102 ms** |
+| AI Boost NPU | 42.8 s first time, ~1 s once cached | 325 ms | 199 ms |
+| CPU | 2.9 s | 1.95 s | 1.8 s |
+
+Per photo on the GPU with OCR: 0.6-1.8 s (CLIP ~100 ms, OCR 0.2-0.6 s, fusion 0.2-1.1 s).
+No "Illegal instruction" in OCR. Four geotagged Commons photos: Cusco 1 km (93 %),
+Hanoi 0 km (65 %), Reykjavik 0 km (44 %), Nairobi wrong (Jakarta, 24 %). One locate,
+right after the first-ever speed test, took 27 s wall time while its own timings said
+1.2 s; it did not happen again after a second speed test or a cold restart.
+
 **`geolock testset <folder>`** (the one to use). Downloads ~300 photos from Wikimedia
 Commons, where every file has a free licence. For each country it picks random towns
 from GeoNames and takes one geotagged photo within 10 km of each, so the set covers the
@@ -425,8 +444,8 @@ about real-photo accuracy yet.
 0. Measure the second opinion (`--ask claude`) only if Brady asks: it uses his plan.
    Evals stay local-only by default.
 1. ~~Run setup, bench, testset and eval~~: done on the Windows desktop (see "Results on
-   the Commons set"). Still to do on the laptop: Settings → Processor → "Test speed on
-   each processor" (or `geolock bench --all-devices`) for Arc GPU / NPU speed.
+   the Commons set") and the speed test on the Yoga laptop (see "Results on the Yoga
+   laptop").
 2. Prefer bigger towns when naming a guess (GeoNames population data) so names are
    recognisable.
 3. ~~Multilingual OCR~~ (done, see the changelog).
@@ -437,6 +456,12 @@ about real-photo accuracy yet.
 7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Version 0.3.1. First run on the Yoga laptop (see "Results on the Yoga
+  laptop"): GPU, NPU and CPU all work. Fix: Ask Claude said "Install Claude Code" when
+  Claude Code was installed by its native installer, which puts `claude.exe` in
+  `~/.local/bin` without adding it to PATH; the app now also looks there (and in
+  `%APPDATA%\npm` for Codex). Docs: the installer goes to `%LOCALAPPDATA%\GeoLock`.
 
 - **2026-10-15**: Version 0.3.0, the first published installer: the desktop app plus the
   smarter second opinion, folder mode and export, and laptop speed mode. Release notes in
