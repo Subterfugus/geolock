@@ -135,7 +135,7 @@ class Geolocator:
     def _intel_gpu(self):
         return is_intel_gpu(self.core)
 
-    def benchmark(self, n=5):
+    def benchmark(self, n=3):
         """Time CLIP on every device this computer has (see geolock.devices.benchmark)."""
         im = Image.fromarray((np.random.default_rng(0).random((768, 1024, 3)) * 255).astype("uint8"))
         return benchmark(self.core, self.runner.model, make_crops(im), n, self.models_dir / "ov_cache")

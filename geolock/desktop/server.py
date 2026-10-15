@@ -99,7 +99,7 @@ class Backend:
                 "analysts": _analysts_now(),
                 "data_dir": str(self.data_dir), "models_dir": str(self.models_dir)}
 
-    def benchmark(self, n=5):
+    def benchmark(self, n=3):
         eng = self.engine
         if eng is None:
             raise HTTPException(409, "The models are not loaded yet.")

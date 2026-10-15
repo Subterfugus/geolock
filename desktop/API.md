@@ -73,7 +73,7 @@ moves to the next device (Auto: GPU → NPU → CPU; a fixed choice: that device
 the photo carries on; `diagnostics.fallback` says what happened.
 
 ### `POST /api/diagnostics/benchmark` → speed test, `GET` → the last one (`rows: []` if none)
-Compiles CLIP on every device and times it (median of 5 runs). Waits for any running
+Compiles CLIP on every device and times it (median of 3 runs). Waits for any running
 analysis. Can take up to a minute the first time (NPU compilation).
 ```json
 {"at": 1760000000.0, "rows": [

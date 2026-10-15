@@ -33,7 +33,7 @@ def present(core, dev):
 
 def device_name(core, dev):
     try:
-        return str(core.get_property(dev, "FULL_DEVICE_NAME"))
+        return str(core.get_property(dev, "FULL_DEVICE_NAME")).strip()
     except Exception:
         return None
 
@@ -151,7 +151,7 @@ class VisionRunner:
                 "fallback": self.fallback, "attempts": list(self.attempts)}
 
 
-def benchmark(core, model, x, n=5, cache_dir=None, devices=ORDER):
+def benchmark(core, model, x, n=3, cache_dir=None, devices=ORDER):
     """Compile and time CLIP on every device this computer has. One row per device:
     compile time, first run (includes one-off kernel set-up) and the median of n runs."""
     rows = []
