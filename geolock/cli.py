@@ -198,7 +198,7 @@ def _fit(eng, cases, a):
           f"country weight {w}: {best:.3f}")
     path = Path(a.fit_out) if a.fit_out else eng.models_dir / "calibration.json"
     cal = dict(eng.calibration, temperature=t, country_weight=w, clue_scales=scales,
-               analyst_weight=eng.analyst_weight, score=round(float(best), 4),
+               analyst_weight=eng.analyst_weight, extra_crops=eng.extra_crops, score=round(float(best), 4),
                photos=len(cases), fitted=_t.strftime("%Y-%m-%d %H:%M"))
     path.write_text(json.dumps(cal, indent=2))
     print(f"  Saved to {path}" + ("; the app uses it from now on." if not a.fit_out else "."))
