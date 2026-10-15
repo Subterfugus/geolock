@@ -580,6 +580,16 @@ async function route(req, res) {
     }
   }
 
+  // The real backend writes the file; the mock only checks the request (the browser UI downloads instead).
+  if (p === '/api/save' && m === 'POST') {
+    const boundary = /boundary=(.+)$/.exec(req.headers['content-type'] || '')?.[1];
+    if (!boundary) return fail(res, 400, 'Send the file as multipart/form-data.');
+    const parts = parseMultipart(await readBody(req), boundary.replace(/"/g, ''));
+    const path = parts.path?.data.toString('utf8') ?? '';
+    if (!/\.(json|csv|kml|png)$/i.test(path)) return fail(res, 400, 'Exports are saved as .json, .csv, .kml, .png files.');
+    return send(res, 200, { path, bytes: parts.file?.data.length ?? 0 });
+  }
+
   if (p === '/api/locate' && m === 'POST') {
     const ct = req.headers['content-type'] || '';
     const boundary = /boundary=(.+)$/.exec(ct)?.[1];

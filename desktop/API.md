@@ -197,6 +197,14 @@ Re-analyses the stored photo (same id). This is how "Ask Claude" / "Ask ChatGPT"
 existing photo works. Earlier analyst answers are kept unless that analyst is asked again.
 ### `GET /api/history/{id}/image` and `/thumb` → JPEG
 
+## Export
+
+### `POST /api/save`  (multipart: `path`, `file`) → `{"path": "C:\\…\\paris-geolock.kml", "bytes": 5321}`
+Writes an export the UI built (JSON, CSV, KML or a PNG of the map) to the path the user
+picked in the native Save dialog. `path` must be absolute, end in `.json`, `.csv`, `.kml`
+or `.png`, and be in a folder that exists; otherwise 400 with a readable message. In the
+browser dev mode the UI downloads the file instead and never calls this.
+
 ## Settings
 
 ### `GET /api/settings`, `PUT /api/settings` (JSON body with any subset) → full settings

@@ -1,9 +1,11 @@
 import {
   AlertTriangle, ChevronDown, ChevronRight, Circle, Copy, ExternalLink, Maximize2, MapPin, Minus, PanelRightClose,
-  Plus, RefreshCw, RotateCw, ScanText, Trash2,
+  Plus, RefreshCw, RotateCw, ScanText, Trash2, Download, FileJson, FileSpreadsheet, Globe2, Image as ImageIcon, LocateFixed, Star,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
-import { askAnalyst, askDelete, reanalyse, selectGuess } from '../lib/controller';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { askAnalyst, askDelete, exportResult, reanalyse, selectGuess } from '../lib/controller';
+import { errorsKm, truthOf } from '../lib/exporter';
+import { haversineKm } from '../lib/geo';
 import { assetUrl } from '../lib/backend';
 import { copyText, openExternal } from '../lib/shell';
 import { mapHandle } from '../lib/map/mapController';
@@ -43,6 +45,7 @@ function InspectorHeader({ name, created, hasId }: { name: string | null; create
       </div>
       {hasId && id && (
         <>
+          <ExportMenu id={id} />
           <IconButton label="Re-analyse" onClick={() => void reanalyse(id)}><RotateCw size={15} /></IconButton>
           <IconButton label="Delete photo" onClick={() => askDelete(id)}>
             <Trash2 size={15} />
@@ -85,6 +88,7 @@ function ResultBody({ result }: { result: Result }) {
         {guess ? (
           <>
             <Hero guess={guess} index={index} />
+            <GroundTruth result={result} index={index} />
             <OtherGuesses result={result} selected={index} />
             <Why guess={guess} index={index} />
             <Countries result={result} guess={guess} />
@@ -171,11 +175,6 @@ function Hero({ guess, index }: { guess: Guess; index: number }) {
           <span className="tnum">{confidenceName(guess.label)}</span>
         </div>
       </div>
-      {guess.km_from_exif != null && (
-        <p className="mt-3 rounded-lg bg-surface px-3 py-2 text-[12px] text-fg-2">
-          The photo's own GPS is <span className="font-semibold text-fg tnum">{km(guess.km_from_exif)}</span> from this guess.
-        </p>
-      )}
       <div className="mt-4 flex items-center gap-2">
         <CopyCoords lat={guess.lat} lon={guess.lon} />
         <Button size="md" className="h-8 flex-1" onClick={() => void openExternal(`https://www.google.com/maps?q=${guess.lat.toFixed(6)},${guess.lon.toFixed(6)}`)}>
@@ -202,6 +201,114 @@ function CopyCoords({ lat, lon }: { lat: number; lon: number }) {
       <span className="truncate font-mono text-[11.5px] text-fg-2 tnum">{coordText(lat, lon)}</span>
       <Copy size={13} className="shrink-0 text-fg-3 transition-colors group-hover:text-fg" />
     </button>
+  );
+}
+
+// ---------------------------------------------------------- ground truth
+
+/** How far off a distance is, in the GeoGuessr-style bands the evals use. */
+function band(d: number): { label: string; tone: 'high' | 'medium' | 'low' } {
+  if (d <= 1) return { label: 'Spot on', tone: 'high' };
+  if (d <= 25) return { label: 'Street level', tone: 'high' };
+  if (d <= 200) return { label: 'City level', tone: 'medium' };
+  if (d <= 750) return { label: 'Region level', tone: 'medium' };
+  if (d <= 2500) return { label: 'Country level', tone: 'low' };
+  return { label: 'Missed', tone: 'low' };
+}
+
+/** When the photo carries its own GPS: where that is and how close each guess came. */
+function GroundTruth({ result, index }: { result: Result; index: number }) {
+  const truth = truthOf(result);
+  if (!truth) return null;
+  if (!result.exif_gps) {
+    return (
+      <p className="-mt-3 flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-[12px] text-fg-3">
+        <LocateFixed size={13} className="shrink-0" /> This photo has its own GPS. Turn on “Show the photo's own GPS” in Settings and re-analyse to compare.
+      </p>
+    );
+  }
+  const errs = errorsKm(result);
+  const d = errs[index] ?? errs[0];
+  const best = errs.reduce<{ i: number; d: number } | null>((acc, e, i) => (e != null && (!acc || e < acc.d) ? { i, d: e } : acc), null);
+  const analysts = result.analysts
+    .filter((a) => a.ok && a.guesses[0])
+    .map((a) => ({ name: a.name, d: a.guesses[0].km_from_exif ?? haversineKm(a.guesses[0].lat, a.guesses[0].lon, truth.lat, truth.lon) }));
+  const where = [result.exif_place?.place?.name, result.exif_place?.region, result.exif_place?.country].filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i).join(', ');
+  const b = d != null ? band(d) : null;
+  return (
+    <section aria-label="The photo's own GPS" className="-mt-3 rounded-2xl border border-medium/35 bg-medium/[0.07] p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-medium">
+            <Star size={12} fill="currentColor" /> Photo's own GPS
+          </div>
+          <p className="mt-1 truncate text-[13px] text-fg" title={plainCoords(truth.lat, truth.lon)}>{where || coordText(truth.lat, truth.lon)}</p>
+          <p className="text-[11px] text-fg-3">Never used for the guess, only to check it.</p>
+        </div>
+        {d != null && b && (
+          <div className="shrink-0 text-right">
+            <div className="text-[20px] font-semibold leading-none tracking-[-0.02em] tnum">{km(d)}</div>
+            <div className={cx('mt-1 text-[11.5px] font-medium', confText(b.tone))}>{b.label}</div>
+          </div>
+        )}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-fg-2">
+        {best && best.i !== index && (
+          <button type="button" onClick={() => selectGuess(best.i)} className="rounded-md bg-surface px-2 py-0.5 hover:bg-surface-3" title="Show that guess">
+            Closest: guess #{best.i + 1}, {km(best.d)}
+          </button>
+        )}
+        {analysts.map((a) => (
+          <span key={a.name} className="rounded-md bg-surface px-2 py-0.5">{a.name}: {km(a.d)}</span>
+        ))}
+        <button
+          type="button"
+          onClick={() => mapHandle.current?.flyTo(truth.lat, truth.lon, 20)}
+          className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-surface"
+        >
+          <MapPin size={12} /> Show on map
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- export
+
+function ExportMenu({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const exporting = useStore((s) => s.exporting);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('mousedown', down);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('keydown', key); };
+  }, [open]);
+  const run = (f: 'png' | 'kml' | 'csv' | 'json') => { setOpen(false); void exportResult(id, f); };
+  const item = (f: 'png' | 'kml' | 'csv' | 'json', icon: ReactNode, label: string, hint: string) => (
+    <button type="button" role="menuitem" onClick={() => run(f)} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-3">
+      <span className="mt-0.5 text-fg-3">{icon}</span>
+      <span><span className="block text-[13px]">{label}</span><span className="block text-[11px] text-fg-3">{hint}</span></span>
+    </button>
+  );
+  return (
+    <div ref={ref} className="relative">
+      <IconButton label="Export this result" disabled={exporting} onClick={() => setOpen((v) => !v)}>
+        {exporting ? <Spinner size={14} /> : <Download size={15} />}
+      </IconButton>
+      {open && (
+        <div role="menu" className="pop-in absolute right-0 top-9 z-40 w-[250px] rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow)]">
+          {item('png', <ImageIcon size={14} />, 'Map image (PNG)', 'The map as shown, with the photo and pins')}
+          {item('kml', <Globe2 size={14} />, 'KML', 'Opens in Google Earth and Google My Maps')}
+          {item('csv', <FileSpreadsheet size={14} />, 'CSV', 'One row per guess, for Excel')}
+          {item('json', <FileJson size={14} />, 'JSON', 'The full result, clues included')}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -8,6 +8,7 @@
     "allow-backend-info",
     "allow-backend-restart",
     "dialog:allow-open",
+    "dialog:allow-save",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://*" }]

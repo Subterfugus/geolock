@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .. import __version__
 from ..geodata import DATA
-from .library import Library, Settings
+from .library import Library, Settings, write_export
 from .modelsetup import ModelSetup, models_ready
 
 ORIGINS = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost",
@@ -267,6 +267,17 @@ def create_app(backend, token=None):
     @app.get("/api/history/{rid}/thumb")
     def history_thumb(rid: str):
         return _jpeg(rid, "thumb")
+
+    # ----------------------------------------------------------------- export
+    @app.post("/api/save")
+    def save_export(path: str = Form(...), file: UploadFile = File(...)):
+        try:
+            p = write_export(path, file.file.read())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except OSError as e:
+            raise HTTPException(400, f"Couldn't write the file: {e.strerror or e}")
+        return {"path": str(p), "bytes": p.stat().st_size}
 
     # --------------------------------------------------------------- settings
     @app.get("/api/settings")
