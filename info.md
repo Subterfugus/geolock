@@ -485,6 +485,18 @@ about real-photo accuracy yet.
 
 ## Changelog
 
+- **2026-10-15**: Version 0.4.2, sharper second opinion (Brady picked ideas 1, 4 and 5 of
+  the accuracy list). (1) Analyst guesses are snapped onto the town they name, looked up
+  in the cities1000 list shipped with reverse_geocoder (`GeoData.find_town`, matched per
+  country without case or accents, nearest same-named town within 150 km); a guess within
+  15 km (or half its radius) of that town is left alone, so street-level points stay.
+  (4) Analysts return `countries` (iso2, probability); the probability they leave outside
+  their pinned guesses now follows those odds instead of GeoLock's own country split
+  (`Geolocator._odds_shape`). (5) Photos with a long side of 2500 px or more also send two
+  full-size close-ups of the road band (30-90 % of the height), about twice the detail of
+  the downscaled photo, for plates, bollards, poles and road lines (`GEOLOCK_LLM_TILES`,
+  default 2, roughly 5,000 extra image tokens per ask). Tested with fake CLIs only.
+
 - **2026-10-15**: Version 0.4.1: the Claude / ChatGPT second opinion may search the web.
   Until now Claude ran with `--tools ""` and the prompt said "do not use tools", and Codex
   had web search off, so neither could look up the shop or street names it read. Now both

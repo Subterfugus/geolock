@@ -44,6 +44,10 @@ MAX_SIDE = 1568  # Claude's largest useful image side; plenty for ChatGPT too
 MAX_CROPS = int(os.environ.get("GEOLOCK_LLM_CROPS", "4"))  # zoomed sign crops sent along
 CROP_SIDE = 768  # crops are small; this keeps them cheap
 CROP_MIN_SIDE = 384  # smaller crops are enlarged to this
+# Close-up tiles of the road band (plates, bollards, poles, road lines): only for photos big
+# enough that a tile at full size shows clearly more than the downscaled whole photo.
+MAX_TILES = int(os.environ.get("GEOLOCK_LLM_TILES", "2"))
+TILE_MIN_PHOTO = int(1.6 * MAX_SIDE)  # long side below this: the whole photo is detailed enough
 
 NAMES = {"claude": "Claude", "chatgpt": "ChatGPT"}
 
@@ -102,8 +106,12 @@ Answer with JSON:
 - text_seen: any text you can read in the photo or crops, or an empty string.
 - web_checks: each web search you ran, with query and found (what it confirmed or
   ruled out, one sentence). Empty if you did not search.
-- guesses: 1 to 5 distinct locations, best first, each with place (as specific as you
-  can justify: city, region or road), country, iso2 (ISO 3166-1 alpha-2), lat, lon,
+- countries: the countries it could be, most likely first (up to 6), each with iso2 and
+  probability (0 to 1, all together at most 1; leave the rest for "somewhere else").
+  These are your odds for the country alone, separate from how precisely you can place it.
+- guesses: 1 to 5 distinct locations, best first, each with place (most specific first:
+  road or landmark, then the town or city by its usual English name, then the region,
+  separated by commas, e.g. "Hohe Straße, Cologne, North Rhine-Westphalia"), country, iso2 (ISO 3166-1 alpha-2), lat, lon,
   radius_km (how far off you might be), confidence (probability from 0 to 1 that the
   photo is within radius_km; all guesses together at most 1) and why (one sentence:
   the evidence for this guess over the others)."""
@@ -140,7 +148,7 @@ SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["checklist", "reasoning", "ruled_out", "driving_side", "text_seen",
-                 "web_checks", "guesses"],
+                 "web_checks", "countries", "guesses"],
     "properties": {
         "checklist": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
@@ -156,6 +164,9 @@ SCHEMA = {
         "web_checks": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["query", "found"],
             "properties": {"query": _STR, "found": _STR}}},
+        "countries": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["iso2", "probability"],
+            "properties": {"iso2": _STR, "probability": {"type": "number"}}}},
         "guesses": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
             "required": ["place", "country", "iso2", "lat", "lon", "radius_km", "confidence",
@@ -419,6 +430,23 @@ def sign_crops(img, ocr_lines, max_crops=MAX_CROPS):
     return out
 
 
+def detail_tiles(img, n=MAX_TILES):
+    """Close-ups of the band where roads, plates, bollards and poles usually are (30% to 90%
+    of the height), split side by side and sent at full size: about twice the detail of
+    the downscaled whole photo on a 12 MP picture. None for smaller photos.
+    Returns [{"box", "text": "", "kind": "tile", "jpeg"}], left to right."""
+    W, H = img.size
+    if n <= 0 or max(W, H) < TILE_MIN_PHOTO:
+        return []
+    y0, y1 = int(0.3 * H), int(0.9 * H)
+    out = []
+    for i in range(n):
+        box = [int(i * W / n), y0, int((i + 1) * W / n), y1]
+        out.append({"box": box, "text": "", "kind": "tile",
+                    "jpeg": _jpeg(img.crop(box), MAX_SIDE)})
+    return out
+
+
 def _overlap(a, b):
     """Intersection over the smaller box."""
     ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
@@ -429,15 +457,17 @@ def _overlap(a, b):
 
 def prompt_text(briefing, crops=(), web=False):
     if crops:
-        which = "Image 2 is a zoomed crop" if len(crops) == 1 else \
-            f"Images 2 to {len(crops) + 1} are zoomed crops"
+        which = "Image 2 is a close-up" if len(crops) == 1 else \
+            f"Images 2 to {len(crops) + 1} are close-ups"
         lines = [f"You get {len(crops) + 1} images. Image 1 is the whole photo. {which} of it, "
-                 "cut at full resolution where GeoLock found text, so you can read signs, "
-                 "plates and shop fronts:"]
+                 "cut at full resolution: zoomed crops where GeoLock found text (signs, "
+                 "plates, shop fronts) and tiles of the road area (look there for licence "
+                 "plates, bollards, poles, road lines and small signs):"]
         for i, c in enumerate(crops, 2):  # the OCR reading is a GeoLock finding: only if shared
-            lines.append(f"- Image {i}: region x {c['box'][0]}-{c['box'][2]}, y {c['box'][1]}-"
+            what = "tile" if c.get("kind") == "tile" else "text crop"
+            lines.append(f"- Image {i}: {what}, region x {c['box'][0]}-{c['box'][2]}, y {c['box'][1]}-"
                          f"{c['box'][3]} of the photo"
-                         + (f"; OCR read “{c['text']}”" if briefing else ""))
+                         + (f"; OCR read “{c['text']}”" if briefing and c.get("text") else ""))
         images = "\n" + "\n".join(lines) + "\n"
     else:
         images = ""
@@ -742,11 +772,25 @@ def clean(data):
                  for r in data.get("ruled_out") or [] if isinstance(r, dict) and r.get("place")]
     web_checks = [{"query": str(w.get("query", ""))[:160], "found": str(w.get("found") or "")[:300]}
                   for w in data.get("web_checks") or [] if isinstance(w, dict) and w.get("query")]
+    countries = {}
+    for c in data.get("countries") or []:
+        try:
+            code, p = str(c["iso2"]).strip().upper(), min(max(float(c["probability"]), 0.0), 1.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(code) == 2 and code.isalpha() and p > 0:
+            countries[code] = countries.get(code, 0.0) + p
+    total = sum(countries.values())
+    if total > 1:
+        countries = {k: v / total for k, v in countries.items()}
+    countries = [{"iso2": k, "probability": round(v, 4)}
+                 for k, v in sorted(countries.items(), key=lambda kv: -kv[1])[:6]]
     side = str(data.get("driving_side", "unknown")).lower()
     return {"reasoning": str(data.get("reasoning", ""))[:2000], "checklist": checklist[:14],
             "clues": clues[:14], "ruled_out": ruled_out[:4],
             "driving_side": side if side in ("left", "right") else "unknown",
             "text_seen": str(data.get("text_seen", ""))[:400], "web_checks": web_checks[:10],
+            "countries": countries,
             "guesses": guesses[:5]}
 
 
@@ -762,7 +806,8 @@ def ask(provider, img, briefing=None, status=None, crops=None, model=None, effor
     out = {"provider": provider, "name": NAMES[provider], "via": status.get("detail"),
            "ok": False, "error": None, "model": None, "effort": effort, "ms": None,
            "web": False,
-           "crops": [{"box": c["box"], "text": c["text"]} for c in crops]}
+           "crops": [{"box": c["box"], "text": c["text"], "kind": c.get("kind", "text")}
+                     for c in crops]}
     if not status.get("available"):
         out["error"] = status.get("detail")
         PROGRESS.finish(provider, "error", out["error"])
@@ -808,6 +853,10 @@ def ask_all(providers, img, briefing=None, ocr_lines=None, options=None):
         crops = sign_crops(img, ocr_lines) if ocr_lines and MAX_CROPS > 0 else []
     except Exception:  # a bad box must never cost the user their answer
         crops = []
+    try:
+        crops += detail_tiles(img)
+    except Exception:
+        pass
     with ThreadPoolExecutor(len(providers)) as ex:
         futs = [ex.submit(ask, p, img, briefing, status[p], crops,
                           (options.get(p) or {}).get("model"), (options.get(p) or {}).get("effort"),
@@ -888,6 +937,38 @@ def model_options(refresh=False):
 
 
 # ------------------------------------------------------------------ fusion
+SNAP_KM = 150  # an analyst's coordinates may be this far from the town it names
+SNAP_SLACK_KM = 15  # closer than this (or half its radius) to the named town: left as given
+
+
+def snap_guesses(a, find_town):
+    """Analysts often name the right town but give coordinates tens of km off. Move each
+    guess onto the town it names, looked up in GeoLock's own list of 140k places
+    (find_town(name, iso2, lat, lon) -> {"name", "admin1", "lat", "lon", "km"} or None).
+    The place parts are tried most specific first; a match farther than SNAP_KM (or the
+    guess's own radius, if larger) is a different town of the same name and is skipped.
+    A guess already near its town (SNAP_SLACK_KM, or half its radius) is left alone, so a
+    street-level point an analyst confirmed online is not pulled to the town centre.
+    Each moved guess keeps its original point in "snapped". Changes `a` in place."""
+    for g in a.get("guesses") or []:
+        if g.get("snapped") or not g.get("iso2") or g.get("radius_km", 0) > 400:
+            continue  # done before, or a guess too vague to pin to one town
+        for part in re.split(r"[,;/()]", g.get("place") or ""):
+            part = part.strip()
+            if len(part) < 3:
+                continue
+            town = find_town(part, g["iso2"], g["lat"], g["lon"])
+            if not town or town["km"] > max(SNAP_KM, g.get("radius_km", 0)):
+                continue
+            if town["km"] <= max(SNAP_SLACK_KM, 0.5 * g.get("radius_km", 0)):
+                break  # consistent with the town already (it may be a precise street point)
+            g["snapped"] = {"to": town["name"], "region": town["admin1"],
+                            "km": round(town["km"], 1), "lat": g["lat"], "lon": g["lon"]}
+            g["lat"], g["lon"] = town["lat"], town["lon"]
+            break
+    return a
+
+
 def analyst_clues(a, codes, name_fn=None):
     """Turn one analyst's answer into clues. Its location guesses become one clue that the
     engine blends in as a mixture (Geolocator.mix_analysts); its country, driving side,
@@ -923,10 +1004,17 @@ def analyst_clues(a, codes, name_fn=None):
                              + (f" {len(gs) - 1} other guess(es)." if len(gs) > 1 else ""),
                       mix=1.0, spots=spots, point_fn=point_fn))
     valid = set(codes)
-    countries = {}
-    for g in gs:
-        if g["iso2"] in valid:
-            countries[g["iso2"]] = countries.get(g["iso2"], 0) + g["confidence"]
+    odds = {c["iso2"]: c["probability"] for c in a.get("countries") or [] if c["iso2"] in valid}
+    if odds:
+        # Country odds: the probability the analyst left outside its pinned guesses follows
+        # these instead of GeoLock's own country split (Geolocator.mix_analysts).
+        clues[-1].country_odds = odds
+        countries = dict(odds)
+    else:  # older answers: the countries of its guesses
+        countries = {}
+        for g in gs:
+            if g["iso2"] in valid:
+                countries[g["iso2"]] = countries.get(g["iso2"], 0) + g["confidence"]
     if len(countries) > 1:
         ctop = max(countries.values())
         names = ", ".join(f"{name_fn(c) if name_fn else c} {p:.0%}"
