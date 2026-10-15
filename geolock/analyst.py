@@ -425,8 +425,25 @@ def prompt_text(briefing, crops=()):
 _detect_cache = {"t": 0.0, "value": None}
 
 
+def _cli_dirs():
+    """Where the CLIs install themselves when that folder is not on PATH. On Windows,
+    Claude Code's native installer puts claude.exe in ~/.local/bin and only suggests
+    adding it to PATH; npm -g puts codex in %APPDATA%\\npm."""
+    home = os.path.expanduser("~")
+    dirs = [os.path.join(home, ".local", "bin"), os.path.join(home, ".claude", "local")]
+    if os.environ.get("APPDATA"):
+        dirs.append(os.path.join(os.environ["APPDATA"], "npm"))
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def _find_cli(name):
+    """Path to the `claude` or `codex` executable: PATH first, then the usual install folders."""
+    dirs = _cli_dirs()
+    return shutil.which(name) or (shutil.which(name, path=os.pathsep.join(dirs)) if dirs else None)
+
+
 def _claude_status():
-    exe = shutil.which("claude")
+    exe = _find_cli("claude")
     if exe:
         try:
             p = _run([exe, "auth", "status", "--json"], timeout=30)
@@ -452,7 +469,7 @@ def _claude_status():
 
 
 def _chatgpt_status():
-    exe = shutil.which("codex")
+    exe = _find_cli("codex")
     if not exe:
         return {"available": False, "via": None,
                 "detail": "Install the Codex CLI (npm i -g @openai/codex) and run: codex login"}
@@ -485,7 +502,7 @@ def _image_blocks(jpegs):
 
 
 def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
-    exe = shutil.which("claude")
+    exe = _find_cli("claude")
     msg = {"type": "user", "message": {"role": "user", "content":
            _image_blocks(jpegs) + [{"type": "text", "text": prompt}]}}
     base = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
@@ -566,7 +583,7 @@ def _ask_anthropic_api(jpegs, prompt, model=None, effort=None, provider="claude"
 
 
 def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt"):
-    exe = shutil.which("codex")
+    exe = _find_cli("codex")
     model = model or os.environ.get("GEOLOCK_CODEX_MODEL")
 
     def on_line(line):
@@ -736,7 +753,7 @@ def _claude_models():
     models = [{"id": "", "name": "Default", "description": "What Claude Code uses for your plan"}]
     efforts = ["low", "medium", "high", "xhigh", "max"]
     aliases = ["opus", "sonnet", "haiku"]
-    exe = shutil.which("claude")
+    exe = _find_cli("claude")
     if exe:
         try:
             text = " ".join(_run([exe, "--help"], timeout=30).stdout.split())
@@ -760,7 +777,7 @@ def _chatgpt_models():
     """The models the installed Codex CLI lists (its own catalogue), with their effort levels."""
     models = [{"id": "", "name": "Default", "description": "What your Codex settings pick"}]
     efforts = ["low", "medium", "high", "xhigh"]
-    exe = shutil.which("codex")
+    exe = _find_cli("codex")
     if exe:
         catalogue = None
         for extra in ([], ["--bundled"]):
