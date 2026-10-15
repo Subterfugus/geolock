@@ -556,7 +556,7 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
       )}
       {crops.length > 0 && (
         <div className="mt-2.5">
-          <div className="text-[11.5px] text-fg-3">Also looked closely at {crops.length === 1 ? 'one sign' : `${crops.length} signs`}</div>
+          <div className="text-[11.5px] text-fg-3">Also looked closely at {closeUps(crops)}</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {crops.map((c, i) => <CropThumb key={i} crop={c} result={result} />)}
           </div>
@@ -582,6 +582,11 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
                   </span>
                 </span>
                 {g.why && <span className="mt-0.5 pl-[18px] text-[11.5px] leading-snug text-fg-2">{g.why}</span>}
+                {g.snapped && (
+                  <span className="mt-0.5 pl-[18px] text-[11px] leading-snug text-fg-3">
+                    Moved {Math.round(g.snapped.km)} km onto {g.snapped.to}, the town it named.
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -644,6 +649,15 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
 }
 
 /** A sign the analyst was sent as a zoomed crop, cut from the photo with CSS. */
+function closeUps(crops: AnalystCrop[]): string {
+  const tiles = crops.filter((c) => c.kind === 'tile').length;
+  const signs = crops.length - tiles;
+  const parts = [];
+  if (signs) parts.push(signs === 1 ? 'one sign' : `${signs} signs`);
+  if (tiles) parts.push(tiles === 1 ? 'one close-up of the road' : `${tiles} close-ups of the road`);
+  return parts.join(' and ');
+}
+
 function CropThumb({ crop, result }: { crop: AnalystCrop; result: Result }) {
   const [x0, y0, x1, y1] = crop.box;
   const W = result.image.width || 1;
@@ -655,7 +669,7 @@ function CropThumb({ crop, result }: { crop: AnalystCrop; result: Result }) {
     <div
       className="relative shrink-0 overflow-hidden rounded-md border border-border bg-surface"
       style={{ width: Math.round(w * scale), height: Math.round(h * scale) }}
-      title={crop.text ? `GeoLock read “${crop.text}” here` : 'Zoomed crop sent with the photo'}
+      title={crop.text ? `GeoLock read “${crop.text}” here` : crop.kind === 'tile' ? 'Close-up of the road area, sent at full size' : 'Zoomed crop sent with the photo'}
     >
       {result.image_url && (
         <img

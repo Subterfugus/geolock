@@ -20,6 +20,7 @@ ANSWER = {"checklist": [{"category": "script_language", "seen": "Hauptbahnhof 2 
           "reasoning": "German text and a yellow direction sign.",
           "ruled_out": [{"place": "Switzerland", "why": "Swiss direction signs are white on blue"}],
           "driving_side": "right", "text_seen": "Hauptbahnhof 2 km",
+          "countries": [{"iso2": "de", "probability": 0.7}, {"iso2": "AT", "probability": 0.2}],
           "guesses": [{"place": "Cologne", "country": "Germany", "iso2": "DE", "lat": 50.94,
                        "lon": 6.96, "radius_km": 50, "confidence": 0.5,
                        "why": "Yellow German direction sign"},
@@ -143,12 +144,15 @@ def test_asks_both_and_strips_metadata(fake_clis):
     assert res[0]["model"] == "claude-test"
     prompt = (fake_clis / "claude.prompt").read_text()
     assert "Notes from GeoLock" in prompt and "Bollards and roadside posts" in prompt
-    assert "Image 1 is the whole photo" not in prompt
-    assert (fake_clis / "claude.images").read_text() == "1"
+    assert "Images 2 to 3 are close-ups" in prompt and "Image 2: tile" in prompt
+    assert (fake_clis / "claude.images").read_text() == "3"
     r = res[0]
     assert [c["category"] for c in r["checklist"]] == ["driving_side", "signs", "script_language"]
     assert r["checklist"][1]["label"] == "Signs" and r["guesses"][0]["why"]
-    assert r["ruled_out"][0]["place"] == "Switzerland" and r["crops"] == []
+    assert r["ruled_out"][0]["place"] == "Switzerland"
+    # a 3000 px photo also gets two close-up tiles of the road band, sent at full size
+    assert [c["kind"] for c in r["crops"]] == ["tile", "tile"]
+    assert r["countries"] == [{"iso2": "DE", "probability": 0.7}, {"iso2": "AT", "probability": 0.2}]
     assert r["clues"][0]["clue"].startswith("Driving side: ")  # flat list for older readers
 
 
@@ -276,6 +280,62 @@ def test_sign_crops_group_lines_and_zoom_in():
     assert len(analyst.sign_crops(img, lines, max_crops=1)) == 1
 
 
+def test_tiles_only_for_big_photos():
+    assert analyst.detail_tiles(Image.new("RGB", (2000, 1500))) == []  # already detailed
+    tiles = analyst.detail_tiles(Image.new("RGB", (4000, 3000)))
+    assert [t["box"] for t in tiles] == [[0, 900, 2000, 2700], [2000, 900, 4000, 2700]]
+    im = Image.open(__import__("io").BytesIO(tiles[0]["jpeg"]))
+    assert max(im.size) == analyst.MAX_SIDE  # about twice the detail of the whole photo
+    assert analyst.detail_tiles(Image.new("RGB", (4000, 3000)), n=0) == []
+
+
+def test_country_odds_are_cleaned():
+    d = analyst.clean(dict(ANSWER, countries=[
+        {"iso2": "de", "probability": 0.9}, {"iso2": "AT", "probability": 0.6},
+        {"iso2": "XYZ", "probability": 0.5}, {"iso2": "CH"}, {"iso2": "FR", "probability": 0}]))
+    assert [c["iso2"] for c in d["countries"]] == ["DE", "AT"]
+    assert sum(c["probability"] for c in d["countries"]) == pytest.approx(1, abs=1e-3)
+    assert analyst.clean({"guesses": ANSWER["guesses"]})["countries"] == []  # older answers
+
+
+def _towns(rows):
+    """find_town over a small list of (name, iso2, lat, lon)."""
+    from geolock.geodata import haversine_km, norm_name
+
+    def find(name, cc, lat, lon):
+        hits = [(float(haversine_km(lat, lon, la, lo)), n, la, lo) for n, c, la, lo in rows
+                if c == cc and norm_name(n) == norm_name(name)]
+        if not hits:
+            return None
+        km, n, la, lo = min(hits)
+        return {"name": n, "admin1": "", "lat": la, "lon": lo, "km": km}
+    return find
+
+
+def test_guesses_snap_to_the_town_they_name():
+    find = _towns([("Cologne", "IT", 45.58, 9.94), ("Koln", "DE", 50.94, 6.96),
+                   ("Saint-Etienne", "FR", 45.43, 4.39), ("Hof", "DE", 50.31, 11.91)])
+    a = {"guesses": [
+        # right town, coordinates 45 km off: moved
+        {"place": "Hohe Strasse, Köln, NRW", "iso2": "DE", "lat": 50.6, "lon": 7.3, "radius_km": 20},
+        # a street point 3 km from the centre it names: kept as given
+        {"place": "Saint-Étienne", "iso2": "FR", "lat": 45.45, "lon": 4.42, "radius_km": 5},
+        # same name in another country, or too far: not moved
+        {"place": "Cologne", "iso2": "DE", "lat": 45.6, "lon": 9.9, "radius_km": 30},
+        {"place": "Hof", "iso2": "DE", "lat": 53.5, "lon": 10.0, "radius_km": 30},
+        # a whole-region guess: not pinned to a town
+        {"place": "Köln", "iso2": "DE", "lat": 51.5, "lon": 9.0, "radius_km": 600}]}
+    analyst.snap_guesses(a, find)
+    g = a["guesses"]
+    assert (g[0]["lat"], g[0]["lon"]) == (50.94, 6.96)
+    assert g[0]["snapped"]["to"] == "Koln" and g[0]["snapped"]["lat"] == 50.6
+    assert 40 < g[0]["snapped"]["km"] < 50
+    assert all("snapped" not in x for x in g[1:])
+    assert (g[1]["lat"], g[3]["lat"]) == (45.45, 53.5)
+    analyst.snap_guesses(a, find)  # a second pass changes nothing
+    assert g[0]["snapped"]["lat"] == 50.6
+
+
 def test_crops_are_sent_after_the_photo(fake_clis):
     img, lines = _sign_photo()
     res = analyst.ask_all(["claude", "chatgpt"], img, briefing="Top guesses: 1. Germany", ocr_lines=lines)
@@ -365,6 +425,7 @@ def test_clues_favour_the_analysts_places():
     # only the mixture carries weight; the rest is shown for context
     assert all(c.strength == 0 for c in clues)
     assert any(c.title == "Claude's country guesses" for c in clues)
+    assert point.country_odds == {"DE": 0.7, "AT": 0.2}
     assert analyst.analyst_clues({"ok": False}, geo.country_codes) == []
 
 
@@ -420,3 +481,27 @@ def test_analyst_answer_moves_the_fused_guess(tiny_engine, fake_clis):
     assert any("Claude places it in Cologne" in w["text"] for w in top["why"])
     brief = (fake_clis / "claude.prompt").read_text()
     assert "Top guesses" in brief and "GPS" not in brief
+
+
+def test_find_town_uses_the_shipped_place_list():
+    geo = GeoData()
+    if geo._cities is None:
+        pytest.skip("reverse_geocoder is not installed")
+    vienna = geo.find_town("vienna", "AT", 48.0, 16.0)
+    assert vienna and abs(vienna["lat"] - 48.21) < 0.05
+    us = geo.find_town("Vienna", "US", 38.9, -77.3)  # the one in Virginia, not Austria's
+    assert us and us["admin1"] == "Virginia" and us["km"] < 10
+    assert geo.find_town("Saint Étienne", "FR", 45.4, 4.4)["name"].startswith("Saint")
+    assert geo.find_town("Nowhere-on-Earth", "DE", 50, 7) is None
+
+
+def test_country_odds_reshape_the_unpinned_probability(tiny_engine):
+    eng = tiny_engine
+    post = np.full(len(eng.gps), 1.0 / len(eng.gps))
+    shaped = eng._odds_shape(post, {"DE": 0.6, "AT": 0.1})
+    codes = eng.geo.country_codes
+    de, at = codes.index("DE"), codes.index("AT")
+    assert shaped.sum() == pytest.approx(1)
+    assert shaped[eng.gal_country == de].sum() == pytest.approx(0.6, abs=0.01)
+    assert shaped[eng.gal_country == at].sum() == pytest.approx(0.1, abs=0.01)
+    assert np.allclose(eng._odds_shape(post, {}), post)

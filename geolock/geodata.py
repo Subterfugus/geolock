@@ -30,6 +30,14 @@ def weighted_center(lat, lon, w):
     return math.degrees(math.asin(v[2])), math.degrees(math.atan2(v[1], v[0]))
 
 
+def norm_name(name):
+    """Place names compared without case, accents or punctuation ("Saint-Étienne" =
+    "saint etienne")."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().casefold()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in s).split())
+
+
 def _cities_csv():
     import importlib.util
     spec = importlib.util.find_spec("reverse_geocoder")
@@ -112,6 +120,30 @@ class GeoData:
         name, admin1, cc = rows[i]
         return {"name": name, "admin1": admin1, "cc": cc,
                 "km": float(haversine_km(lat, lon, clat[i], clon[i]))}
+
+    @cached_property
+    def _town_index(self):
+        """(country code, normalised name) -> row numbers in the cities table."""
+        if self._cities is None:
+            return {}
+        idx = {}
+        for i, (name, _, cc) in enumerate(self._cities[3]):
+            idx.setdefault((cc, norm_name(name)), []).append(i)
+        return idx
+
+    def find_town(self, name, cc, lat, lon):
+        """The town called `name` in country `cc` nearest to (lat, lon), or None:
+        {"name", "admin1", "lat", "lon", "km"} (km from the given point)."""
+        rows = self._town_index.get((str(cc).upper(), norm_name(name)))
+        if not rows:
+            return None
+        _, clat, clon, table = self._cities
+        rows = np.asarray(rows)
+        d = haversine_km(lat, lon, clat[rows], clon[rows])
+        j = int(np.argmin(d))
+        i = int(rows[j])
+        return {"name": table[i][0], "admin1": table[i][1], "lat": float(clat[i]),
+                "lon": float(clon[i]), "km": float(d[j])}
 
     def places_near(self, lat, lon, radius_km):
         """(lat, lon) arrays of named places within radius_km, for snapping refinement."""

@@ -17,6 +17,7 @@ class Clue:
     # spots = [(lat, lon, radius_km, prob)], mix > 0 marks the clue (see Geolocator.mix_analysts).
     mix: float = 0.0
     spots: list = field(default_factory=list)
+    country_odds: dict = field(default_factory=dict)  # iso2 -> analyst's probability
 
     def country_loglik(self, codes):
         """Per-country log-likelihood vector for the list of iso2 codes."""

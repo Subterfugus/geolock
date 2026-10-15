@@ -315,12 +315,13 @@ class Geolocator:
             final = (1 - w) * local + w * mean over analysts of their own distribution,
         where an analyst's distribution puts each guess's stated probability in a bump of
         its stated radius around it, and the probability it did not assign follows the local
-        posterior. Returns (final, the part of it sitting in the analysts' bumps)."""
+        posterior, re-split across countries by the analyst's own country odds when it gave
+        them. Returns (final, the part of it sitting in the analysts' bumps)."""
         mixers = [c for c in clues if c.mix > 0 and c.spots]
         if not mixers:
             return post, None
         spots = np.zeros_like(post)
-        rest = 0.0
+        rest = np.zeros_like(post)
         for c in mixers:
             left = 1.0
             for lat, lon, r, p in c.spots:
@@ -332,10 +333,34 @@ class Geolocator:
                     b[int(np.argmin(d))] = 1.0
                 spots += p * b / b.sum() / len(mixers)
                 left -= p
-            rest += max(left, 0.0) / len(mixers)
+            rest += max(left, 0.0) / len(mixers) * self._odds_shape(post, c.country_odds)
         w = self.analyst_weight
-        final = (1 - w) * post + w * (spots + rest * post)
+        final = (1 - w) * post + w * (spots + rest)
         return final / final.sum(), w * spots
+
+    def _odds_shape(self, post, odds):
+        """The local posterior with its country totals replaced by an analyst's country odds
+        (the unlisted countries share what is left, in their local proportions). Sums to 1."""
+        post = post / post.sum()
+        if not odds:
+            return post
+        post = post + 1e-9  # a country the local model all but ruled out can still be lifted
+        n_c = len(self.geo.country_codes)
+        gc = np.where(self.gal_country >= 0, self.gal_country, n_c)  # n_c = open water
+        mass = np.bincount(gc, weights=post, minlength=n_c + 1)
+        target = np.zeros(n_c + 1)
+        for code, p in odds.items():
+            i = self.geo.code_to_index.get(code)
+            if i is not None and mass[i] > 1e-12:
+                target[i] = p
+        listed = target > 0
+        left = max(1.0 - target.sum(), 0.0)
+        other = mass[~listed].sum()
+        if other > 1e-12:
+            target[~listed] = left * mass[~listed] / other
+        scale = np.divide(target, mass, out=np.zeros_like(target), where=mass > 1e-12)
+        shaped = post * scale[gc]
+        return shaped / shaped.sum() if shaped.sum() > 0 else post
 
     def locate(self, image, use_ocr=True, use_vlm=False, use_exif_gps=True, top_k=5,
                keep_evidence=False, ask=(), share_local=True, prior_analysts=(),
@@ -352,7 +377,7 @@ class Geolocator:
         ev = self.evidence(im, meta, use_ocr, use_vlm, timings)
         analysts = [a for a in prior_analysts if a.get("provider") not in ask]
         if ask or analysts:
-            from .analyst import analyst_clues, ask_all
+            from .analyst import analyst_clues, ask_all, snap_guesses
             t = time.perf_counter()
             if ask:
                 fresh = ask_all(ask, im, self.briefing(ev, meta) if share_local else None,
@@ -361,6 +386,8 @@ class Geolocator:
                 # stopped by the user: keep the answer this photo already had, if any
                 analysts += [earlier.get(a["provider"], a) if a.get("stopped") else a for a in fresh]
             for a in analysts:
+                if a.get("ok"):
+                    snap_guesses(a, self.geo.find_town)
                 ev["clues"] += analyst_clues(a, codes, self.geo.country_name)
                 for g in a.get("guesses", []):
                     if use_exif_gps and meta.get("gps"):

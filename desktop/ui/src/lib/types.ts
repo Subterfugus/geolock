@@ -224,6 +224,8 @@ export interface AnalystGuess {
   /** One sentence: the evidence for this guess over the others. */
   why?: string | null;
   km_from_exif?: number | null;
+  /** GeoLock moved the guess onto the town it named; its original point and the distance. */
+  snapped?: { to: string; region: string; km: number; lat: number; lon: number } | null;
 }
 
 export interface AnalystClue {
@@ -243,6 +245,8 @@ export interface AnalystCheck {
 export interface AnalystCrop {
   box: [number, number, number, number];
   text: string;
+  /** "text": where GeoLock found text; "tile": a close-up of the road area. */
+  kind?: 'text' | 'tile';
 }
 
 export interface Analyst {
@@ -267,6 +271,8 @@ export interface Analyst {
   /** Whether it was allowed to search the web, and what it checked (absent on older answers). */
   web?: boolean;
   web_checks?: { query: string; found: string }[];
+  /** Its odds for the country alone (absent on answers before 0.4.2). */
+  countries?: { iso2: string; probability: number }[];
   guesses: AnalystGuess[];
 }
 
