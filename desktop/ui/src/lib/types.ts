@@ -103,6 +103,8 @@ export interface Settings {
   read_text: boolean;
   show_exif_gps: boolean;
   share_findings: boolean;
+  /** Claude/ChatGPT may search the web to check sign text and candidate places. */
+  analyst_web_search: boolean;
   keep_history: boolean;
   theme: ThemeMode;
   map_style: MapStyleKind;
@@ -140,6 +142,8 @@ export interface AnalystLive {
   /** The latest line of the model's thinking, when the CLI shares it. */
   note: string;
   chars: number;
+  /** Web searches run so far (absent from older backends). */
+  searches?: number;
   error: string | null;
 }
 export interface AnalystProgress {
@@ -260,6 +264,9 @@ export interface Analyst {
   clues: AnalystClue[];
   driving_side: string | null;
   text_seen: string | null;
+  /** Whether it was allowed to search the web, and what it checked (absent on older answers). */
+  web?: boolean;
+  web_checks?: { query: string; found: string }[];
   guesses: AnalystGuess[];
 }
 

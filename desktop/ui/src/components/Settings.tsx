@@ -148,6 +148,11 @@ function SettingsSections({ settings }: { settings: SettingsT }) {
           hint="Off gives the analyst the photo alone, for a fully independent opinion."
           control={<Switch label="Share GeoLock's findings" checked={settings.share_findings} onChange={(v) => void updateSettings({ share_findings: v })} />}
         />
+        <Row
+          label="Let them search the web"
+          hint="They look up shop names, street names and phone numbers they read, to confirm the exact place. Slower, but often much more precise. The photo itself is never searched."
+          control={<Switch label="Let them search the web" checked={settings.analyst_web_search ?? true} onChange={(v) => void updateSettings({ analyst_web_search: v })} />}
+        />
         <p className="rounded-xl bg-surface-2 px-3.5 py-3 text-[12px] leading-relaxed text-fg-3">
           The photo is sent without GPS or other metadata, to Anthropic (Claude) or OpenAI (ChatGPT), through the tool you signed in to with your own plan. GeoLock does not keep their accounts or send them anything else.
         </p>

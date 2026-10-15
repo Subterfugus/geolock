@@ -71,6 +71,9 @@ if "--include-partial-messages" in args:
     ev({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "{}"}})
 if "slow" in open(__import__("os").path.join(here, "mode")).read():
     __import__("time").sleep(60)
+if "WebSearch,WebFetch" in args:
+    print(json.dumps({"type": "assistant", "message": {"model": "claude-test", "content": [
+        {"type": "tool_use", "name": "WebSearch", "input": {"query": "Bäckerei Schmitz Köln"}}]}}), flush=True)
 print(json.dumps({"type": "assistant", "message": {"model": "claude-test", "content": []}}))
 print(json.dumps({"type": "result", "is_error": False, "result": "ok",
                   "structured_output": ANSWER}))
@@ -104,6 +107,9 @@ open(__import__("os").path.join(here, "codex.args"), "w").write(json.dumps(args)
 if "--json" in args:
     print(json.dumps({"type": "turn.started"}), flush=True)
     print(json.dumps({"type": "item.completed", "item": {"type": "reasoning", "text": "**Reading the sign**"}}), flush=True)
+    if 'web_search="live"' in args:
+        for kind in ("item.started", "item.completed"):  # one search, reported twice
+            print(json.dumps({"type": kind, "item": {"id": "ws1", "type": "web_search", "query": "Hauptbahnhof sign"}}), flush=True)
 out = args[args.index("--output-last-message") + 1]
 open(out, "w").write(json.dumps(ANSWER))
 """
@@ -165,7 +171,8 @@ def test_model_and_effort_reach_the_clis(fake_clis):
 
 def test_progress_follows_the_stream(fake_clis):
     img = Image.new("RGB", (800, 600), (20, 90, 40))
-    analyst.ask_all(["claude", "chatgpt"], img, options={"claude": {"effort": "low"}})
+    analyst.ask_all(["claude", "chatgpt"], img, options={"claude": {"effort": "low", "web": False},
+                                                         "chatgpt": {"web": False}})
     snap = analyst.PROGRESS.snapshot()
     assert not snap["running"]
     c, g = snap["providers"]["claude"], snap["providers"]["chatgpt"]
@@ -173,6 +180,31 @@ def test_progress_follows_the_stream(fake_clis):
     assert c["model"] == "claude-test" and c["effort"] == "low" and c["chars"] > 10
     assert c["note"] == "Yellow sign: Germany"  # the latest line of its thinking
     assert g["note"] == "Reading the sign"
+
+
+def test_web_search_is_on_by_default_and_can_be_turned_off(fake_clis):
+    img = Image.new("RGB", (800, 600), (20, 90, 40))
+    ans = dict(ANSWER, web_checks=[{"query": "Bäckerei Schmitz Köln", "found": "A bakery on Aachener Str., Cologne"}])
+    assert analyst.clean(ans)["web_checks"][0]["found"].startswith("A bakery")
+    res = analyst.ask_all(["claude", "chatgpt"], img)
+    assert all(r["ok"] and r["web"] for r in res), [r["error"] for r in res]
+    cargs = json.loads((fake_clis / "claude.args").read_text())
+    assert cargs[cargs.index("--tools") + 1] == "WebSearch,WebFetch"
+    assert cargs[cargs.index("--allowedTools") + 1] == "WebSearch,WebFetch"
+    assert "You can search the web" in (fake_clis / "claude.prompt").read_text()
+    gargs = json.loads((fake_clis / "codex.args").read_text())
+    assert 'web_search="live"' in gargs
+    snap = analyst.PROGRESS.snapshot()["providers"]
+    assert snap["claude"]["searches"] == 1 and snap["chatgpt"]["searches"] == 1
+
+    res = analyst.ask_all(["claude", "chatgpt"], img, options={"claude": {"web": False},
+                                                                "chatgpt": {"web": False}})
+    assert all(r["ok"] and not r["web"] for r in res)
+    cargs = json.loads((fake_clis / "claude.args").read_text())
+    assert cargs[cargs.index("--tools") + 1] == "" and "--allowedTools" not in cargs
+    assert "Do not run commands or use tools" in (fake_clis / "claude.prompt").read_text()
+    assert 'web_search="disabled"' in json.loads((fake_clis / "codex.args").read_text())
+    assert analyst.PROGRESS.snapshot()["providers"]["claude"]["searches"] == 0
 
 
 def test_stop_ends_a_running_analyst(fake_clis):

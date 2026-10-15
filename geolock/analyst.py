@@ -15,6 +15,9 @@ API key (``codex login --with-api-key``).
 What is sent: the photo re-encoded from pixels (no EXIF, so no GPS or camera serial) and,
 unless turned off, a short text summary of GeoLock's own findings. Nothing is sent
 unless the user asks for it on that photo.
+
+Web search (on unless turned off): the analysts may search the web with words they choose,
+such as a shop name read off a sign, to check a candidate place. The photo is never searched.
 """
 import base64
 import io
@@ -86,8 +89,8 @@ items that are not visible; do not guess at them.
 Then read the notes from GeoLock, an offline model, if any are given below. GeoLock's
 visual guesses are often wrong by hundreds or thousands of km on photos without text, so
 treat them as weak hints; text it read and time zones are more reliable. Its OCR can
-misread characters, so trust your own reading of the crops when they differ. Do not run
-commands or use tools; answer from the images.
+misread characters, so trust your own reading of the crops when they differ.
+{tools}
 
 Answer with JSON:
 - checklist: the items you could see, each with category (one of {categories}), seen
@@ -97,11 +100,32 @@ Answer with JSON:
   place and why (the evidence against it). Empty if none.
 - driving_side: left, right or unknown.
 - text_seen: any text you can read in the photo or crops, or an empty string.
+- web_checks: each web search you ran, with query and found (what it confirmed or
+  ruled out, one sentence). Empty if you did not search.
 - guesses: 1 to 5 distinct locations, best first, each with place (as specific as you
   can justify: city, region or road), country, iso2 (ISO 3166-1 alpha-2), lat, lon,
   radius_km (how far off you might be), confidence (probability from 0 to 1 that the
   photo is within radius_km; all guesses together at most 1) and why (one sentence:
   the evidence for this guess over the others)."""
+
+# With web search on (the default), the analyst checks what it read against the web
+# instead of answering from memory: a shop name, phone prefix or street name often pins a
+# photo to one town, which no amount of looking at vegetation will.
+WEB_TOOLS = """You can search the web, and you should use it to check your evidence rather than
+answer from memory. Good searches:
+- Exact text you read: business and shop names (with the town if visible), street and
+  place names, phone numbers, web addresses, route numbers, company names on vehicles.
+  Searching a business name together with your candidate town confirms or rules it out.
+- Your leading candidates: confirm a road, town or landmark really exists there and
+  matches what you see (for example that a chain operates in that country, or that a
+  route number belongs to that region), and look up its coordinates.
+Search with words only; you cannot search with the image. Stop after about {max_searches}
+searches or once a place is confirmed. Do not run commands. Put coordinates you confirmed
+online in your guesses, and lower your confidence when searches contradict a guess."""
+
+NO_TOOLS = "Do not run commands or use tools; answer from the images."
+MAX_SEARCHES = int(os.environ.get("GEOLOCK_LLM_SEARCHES", "8"))
+WEB_EXTRA_S = 180  # searching takes longer; added to the time limit
 
 CATEGORY_LABELS = {
     "driving_side": "Driving side", "road_markings": "Road lines", "signs": "Signs",
@@ -115,7 +139,8 @@ _STR = {"type": "string"}
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["checklist", "reasoning", "ruled_out", "driving_side", "text_seen", "guesses"],
+    "required": ["checklist", "reasoning", "ruled_out", "driving_side", "text_seen",
+                 "web_checks", "guesses"],
     "properties": {
         "checklist": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
@@ -128,6 +153,9 @@ SCHEMA = {
             "properties": {"place": _STR, "why": _STR}}},
         "driving_side": {"type": "string", "enum": ["left", "right", "unknown"]},
         "text_seen": _STR,
+        "web_checks": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["query", "found"],
+            "properties": {"query": _STR, "found": _STR}}},
         "guesses": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
             "required": ["place", "country", "iso2", "lat", "lon", "radius_km", "confidence",
@@ -175,7 +203,8 @@ class Progress:
             self.state = {p: {"stage": "preparing", "started": now, "updated": now,
                               "model": (options.get(p) or {}).get("model") or None,
                               "effort": (options.get(p) or {}).get("effort") or None,
-                              "note": "", "chars": 0, "error": None} for p in providers}
+                              "note": "", "chars": 0, "searches": 0, "error": None}
+                          for p in providers}
 
     def set(self, provider, **kw):
         with self.lock:
@@ -398,7 +427,7 @@ def _overlap(a, b):
     return ix * iy / small
 
 
-def prompt_text(briefing, crops=()):
+def prompt_text(briefing, crops=(), web=False):
     if crops:
         which = "Image 2 is a zoomed crop" if len(crops) == 1 else \
             f"Images 2 to {len(crops) + 1} are zoomed crops"
@@ -415,7 +444,8 @@ def prompt_text(briefing, crops=()):
     text = INSTRUCTIONS.format(
         images=images,
         checklist="\n".join(f"{i}. {t}" for i, t in enumerate(CHECKLIST.values(), 1)),
-        categories=", ".join(CHECKLIST))
+        categories=", ".join(CHECKLIST),
+        tools=WEB_TOOLS.format(max_searches=MAX_SEARCHES) if web else NO_TOOLS)
     if not briefing:
         return text
     return text + "\n\nNotes from GeoLock:\n" + briefing
@@ -501,13 +531,26 @@ def _image_blocks(jpegs):
                                          "data": base64.b64encode(j).decode()}} for j in jpegs]
 
 
-def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
+def _searched(provider, query):
+    """Count a web search and show its query as the live note."""
+    with PROGRESS.lock:
+        st = PROGRESS.state.get(provider)
+        if st is not None:
+            st["searches"] = st.get("searches", 0) + 1
+    PROGRESS.set(provider, stage="thinking",
+                 note=f"Searching the web: {query}"[:300] if query else "Searching the web")
+
+
+def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude", web=False):
     exe = _find_cli("claude")
     msg = {"type": "user", "message": {"role": "user", "content":
            _image_blocks(jpegs) + [{"type": "text", "text": prompt}]}}
     base = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
             "--verbose"]
-    extra = ["--no-session-persistence", "--tools", "", "--setting-sources", "",
+    # Web search: WebSearch/WebFetch are the only tools, pre-approved because -p cannot ask.
+    tools = ["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"] \
+        if web else ["--tools", ""]
+    extra = ["--no-session-persistence", *tools, "--setting-sources", "",
              "--strict-mcp-config", "--system-prompt", SYSTEM,
              "--json-schema", json.dumps(SCHEMA, separators=(",", ":")),
              "--include-partial-messages"]
@@ -524,7 +567,12 @@ def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
         if kind == "system" and ev.get("subtype") == "init":
             PROGRESS.set(provider, stage="starting", model=ev.get("model"))
         elif kind == "assistant":
-            PROGRESS.set(provider, model=(ev.get("message") or {}).get("model"))
+            m = ev.get("message") or {}
+            PROGRESS.set(provider, model=m.get("model"))
+            for b in m.get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    _searched(provider, inp.get("query") or inp.get("url") or b.get("name", ""))
         elif kind == "stream_event":
             e = ev.get("event") or {}
             if e.get("type") == "message_start":
@@ -543,9 +591,12 @@ def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
                     PROGRESS.set(provider, stage="writing")
 
     with tempfile.TemporaryDirectory(prefix="geolock-") as tmp:  # no CLAUDE.md to pick up
-        p = _run_live(base + extra, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line)
+        limit = TIMEOUT_S + (WEB_EXTRA_S if web else 0)
+        p = _run_live(base + extra, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line,
+                      timeout=limit)
         if _unknown_flag(p):  # older Claude Code: plain run, JSON from the text
-            p = _run_live(base, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line)
+            p = _run_live(base, stdin=json.dumps(msg) + "\n", cwd=tmp, on_line=on_line,
+                          timeout=limit)
     result, used_model = None, None
     for line in p.stdout.splitlines():
         try:
@@ -564,7 +615,8 @@ def _ask_claude_code(jpegs, prompt, model=None, effort=None, provider="claude"):
     return data, result.get("result") or "", used_model
 
 
-def _ask_anthropic_api(jpegs, prompt, model=None, effort=None, provider="claude"):
+def _ask_anthropic_api(jpegs, prompt, model=None, effort=None, provider="claude", web=False):
+    # Billed per use, so no web search here; ask() words the prompt to match.
     import anthropic
     client = anthropic.Anthropic()
     model = model or os.environ.get("GEOLOCK_CLAUDE_MODEL") or "claude-opus-5-5"
@@ -582,9 +634,10 @@ def _ask_anthropic_api(jpegs, prompt, model=None, effort=None, provider="claude"
     return parse(text), text, r.model
 
 
-def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt"):
+def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt", web=False):
     exe = _find_cli("codex")
     model = model or os.environ.get("GEOLOCK_CODEX_MODEL")
+    seen = {}
 
     def on_line(line):
         ev = json.loads(line)
@@ -594,7 +647,14 @@ def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt"):
         elif kind.startswith("item."):
             item = ev.get("item") or {}
             text = str(item.get("text") or "")
-            if item.get("type") == "reasoning":
+            if item.get("type") == "web_search":  # started, then completed with the query
+                query = str(item.get("query") or "")
+                if item.get("id") not in seen:
+                    seen[item.get("id")] = True
+                    _searched(provider, query)
+                elif query:
+                    PROGRESS.set(provider, note=f"Searching the web: {query}"[:300])
+            elif item.get("type") == "reasoning":
                 PROGRESS.set(provider, stage="thinking", note=text)
                 if kind == "item.completed":
                     PROGRESS.add_chars(provider, len(text))
@@ -622,12 +682,16 @@ def _ask_codex(jpegs, prompt, model=None, effort=None, provider="chatgpt"):
             base += ["--model", model]
         if effort:
             base += ["-c", f'model_reasoning_effort="{effort}"']
+        # `codex exec` has no --search flag; the web_search config key does the same job.
+        base += ["-c", f'web_search="{"live" if web else "disabled"}"']
         prompt = SYSTEM + "\n\n" + prompt
         PROGRESS.set(provider, stage="starting")
+        limit = TIMEOUT_S + (WEB_EXTRA_S if web else 0)
         p = _run_live(base + ["--ephemeral", "--json", "-c", 'model_reasoning_summary="auto"',
-                              "--output-schema", schema, "-"], stdin=prompt, cwd=tmp, on_line=on_line)
+                              "--output-schema", schema, "-"], stdin=prompt, cwd=tmp,
+                      on_line=on_line, timeout=limit)
         if _unknown_flag(p):  # older Codex CLI
-            p = _run_live(base + ["-"], stdin=prompt, cwd=tmp, on_line=on_line)
+            p = _run_live(base + ["-"], stdin=prompt, cwd=tmp, on_line=on_line, timeout=limit)
         text = open(out, encoding="utf-8").read() if os.path.exists(out) else ""
     if not text.strip():
         raise RuntimeError((p.stderr or p.stdout or f"codex exited with {p.returncode}").strip()[-400:])
@@ -676,22 +740,28 @@ def clean(data):
         clues = [{"clue": f"{c['label']}: {c['seen']}", "suggests": c["suggests"]} for c in checklist]
     ruled_out = [{"place": str(r.get("place", ""))[:80], "why": str(r.get("why") or "")[:200]}
                  for r in data.get("ruled_out") or [] if isinstance(r, dict) and r.get("place")]
+    web_checks = [{"query": str(w.get("query", ""))[:160], "found": str(w.get("found") or "")[:300]}
+                  for w in data.get("web_checks") or [] if isinstance(w, dict) and w.get("query")]
     side = str(data.get("driving_side", "unknown")).lower()
     return {"reasoning": str(data.get("reasoning", ""))[:2000], "checklist": checklist[:14],
             "clues": clues[:14], "ruled_out": ruled_out[:4],
             "driving_side": side if side in ("left", "right") else "unknown",
-            "text_seen": str(data.get("text_seen", ""))[:400], "guesses": guesses[:5]}
+            "text_seen": str(data.get("text_seen", ""))[:400], "web_checks": web_checks[:10],
+            "guesses": guesses[:5]}
 
 
-def ask(provider, img, briefing=None, status=None, crops=None, model=None, effort=None):
+def ask(provider, img, briefing=None, status=None, crops=None, model=None, effort=None,
+        web=True):
     """One analyst's answer as a JSON-ready dict; never raises.
     crops: from sign_crops(); sent after the whole photo as zoomed views of the text.
-    model, effort: passed to the CLI (empty = the CLI's own default)."""
+    model, effort: passed to the CLI (empty = the CLI's own default).
+    web: let it search the web to check what it read (CLI sign-ins only)."""
     status = status or detect()[provider]
     crops = crops or []
     effort = effort if effort in EFFORTS else None
     out = {"provider": provider, "name": NAMES[provider], "via": status.get("detail"),
            "ok": False, "error": None, "model": None, "effort": effort, "ms": None,
+           "web": False,
            "crops": [{"box": c["box"], "text": c["text"]} for c in crops]}
     if not status.get("available"):
         out["error"] = status.get("detail")
@@ -701,9 +771,11 @@ def ask(provider, img, briefing=None, status=None, crops=None, model=None, effor
     try:
         jpegs = [photo_jpeg(img)] + [c["jpeg"] for c in crops]
         PROGRESS.set(provider, stage="starting")
-        data, raw, used = BACKENDS[status["via"]](jpegs, prompt_text(briefing, crops),
+        web = bool(web) and status["via"] != "anthropic-api"
+        out["web"] = web
+        data, raw, used = BACKENDS[status["via"]](jpegs, prompt_text(briefing, crops, web),
                                                   model=model or None, effort=effort,
-                                                  provider=provider)
+                                                  provider=provider, web=web)
         data = clean(data)
         out["model"] = used or model or None
         if not data or not data["guesses"]:
@@ -725,7 +797,7 @@ def ask(provider, img, briefing=None, status=None, crops=None, model=None, effor
 def ask_all(providers, img, briefing=None, ocr_lines=None, options=None):
     """Ask each provider in parallel. ocr_lines: GeoLock's OCR result, used to cut zoomed
     crops of the signs (sent whether or not the briefing is shared: they are the photo).
-    options: {"claude": {"model": "opus", "effort": "high"}, ...}"""
+    options: {"claude": {"model": "opus", "effort": "high", "web": True}, ...}"""
     providers = [p for p in dict.fromkeys(providers) if p in NAMES]
     if not providers:
         return []
@@ -738,7 +810,8 @@ def ask_all(providers, img, briefing=None, ocr_lines=None, options=None):
         crops = []
     with ThreadPoolExecutor(len(providers)) as ex:
         futs = [ex.submit(ask, p, img, briefing, status[p], crops,
-                          (options.get(p) or {}).get("model"), (options.get(p) or {}).get("effort"))
+                          (options.get(p) or {}).get("model"), (options.get(p) or {}).get("effort"),
+                          (options.get(p) or {}).get("web", True))
                 for p in providers]
         return [f.result() for f in futs]
 

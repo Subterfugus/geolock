@@ -113,7 +113,8 @@ class Backend:
         eng = self.engine
         if eng is None:
             raise HTTPException(409, "The models are not loaded yet.")
-        opts = {p: {"model": self.settings[f"{p}_model"], "effort": self.settings[f"{p}_effort"]}
+        opts = {p: {"model": self.settings[f"{p}_model"], "effort": self.settings[f"{p}_effort"],
+                    "web": self.settings["analyst_web_search"]}
                 for p in ("claude", "chatgpt")}
         if ask:  # Stop works from now on, also while GeoLock's own analysis runs first
             from ..analyst import PROGRESS

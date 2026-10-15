@@ -514,6 +514,7 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
   const meta = [a.model, a.effort ? effortLabel(a.effort) : null, a.ms != null ? formatSeconds(a.ms) : null].filter(Boolean).join(' · ');
   const checklist = a.checklist ?? [];
   const ruledOut = a.ruled_out ?? [];
+  const webChecks = a.web_checks ?? [];
   const crops = a.crops ?? [];
   if (!a.ok) {
     return (
@@ -599,6 +600,18 @@ function AnalystCard({ analyst: a, result }: { analyst: Analyst; result: Result 
               </div>
             ))}
           </dl>
+        </Disclosure>
+      )}
+      {webChecks.length > 0 && (
+        <Disclosure label={`Checked online (${webChecks.length})`}>
+          <ul className="flex flex-col gap-1.5 text-[12.5px]">
+            {webChecks.map((w, i) => (
+              <li key={i} className="leading-snug">
+                <span className="font-medium">“{w.query}”</span>
+                {w.found && <span className="text-fg-2">: {w.found}</span>}
+              </li>
+            ))}
+          </ul>
         </Disclosure>
       )}
       {ruledOut.length > 0 && (

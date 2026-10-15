@@ -95,13 +95,21 @@ so GeoLock runs the official CLIs the user is signed in to, as a subprocess, on 
 only:
 
 - Claude: `claude -p --input-format stream-json --output-format stream-json --verbose
-  --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence
+  --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch (or --tools "" with web
+  search off) --setting-sources "" --strict-mcp-config --no-session-persistence
   --system-prompt … --json-schema …`, in an empty temp folder. The photo goes in as a
   base64 image block on stdin; the answer comes back as `structured_output` in the
   `result` event. Login check: `claude auth status --json` (`loggedIn`).
 - ChatGPT: `codex exec --skip-git-repo-check --sandbox read-only --ephemeral -C <tmp>
   --image photo.jpg [--image crop1.jpg …] --output-schema schema.json
-  --output-last-message answer.json -` with the prompt on stdin. Login check: `codex login status` (exit code 0).
+  --output-last-message answer.json -c web_search="live" -` with the prompt on stdin
+  (`codex exec` has no `--search` flag; the `web_search` config key, values live /
+  cached / indexed / disabled, does the same). Login check: `codex login status` (exit code 0).
+- Web search (0.4.1, setting `analyst_web_search`, on by default): the prompt tells the
+  analyst to verify what it read (business, street and place names, phone numbers,
+  domains) and its candidate places with up to ~8 searches (`GEOLOCK_LLM_SEARCHES`), and
+  to report them in `web_checks` (query, found). The time limit grows by 180 s. The
+  API-key fallback never searches (billed per search).
 - Fallbacks: no Claude Code but `ANTHROPIC_API_KEY` set and `anthropic` installed: the
   Messages API with structured output (`claude-opus-5-5`, override with
   `GEOLOCK_CLAUDE_MODEL`). Codex accepts an API key via `codex login --with-api-key`.
@@ -476,6 +484,14 @@ about real-photo accuracy yet.
 7. ~~Batch mode in the app~~ (done: folder mode, accuracy card, CSV/KML export).
 
 ## Changelog
+
+- **2026-10-15**: Version 0.4.1: the Claude / ChatGPT second opinion may search the web.
+  Until now Claude ran with `--tools ""` and the prompt said "do not use tools", and Codex
+  had web search off, so neither could look up the shop or street names it read. Now both
+  get web search (Claude: WebSearch/WebFetch pre-approved; Codex: `-c web_search="live"`),
+  the prompt says what to verify, the live progress shows each search, and the answer card
+  lists "Checked online". Setting to turn it off. Tested with fake CLIs only (no real
+  Claude / ChatGPT calls); the Codex config key was checked against Codex CLI 0.162.1.
 
 - **2026-10-15**: Version 0.4.0, a UX overhaul after Brady's first use: model and
   reasoning-effort pickers for Claude / ChatGPT with live progress and Stop; the street map
