@@ -233,8 +233,10 @@ Start menu, and it runs in its own window. The browser version (`run.bat`) still
   photo with text, clean exit), then builds the NSIS installer. Pushes to main publish it
   as a GitHub release `v<version>` with notes from `docs/releases/v<version>.md`; an
   existing release is never overwritten, so bump the version (pyproject, `geolock/__init__`,
-  `tauri.conf.json`, Cargo and npm manifests) to ship a new installer. Main builds always
-  run to the end; only PR builds cancel each other.
+  `tauri.conf.json`, Cargo and npm manifests) to ship a new installer. This slow job runs
+  only on pushes to main (or by hand) and always runs to the end. Pull requests get only the
+  quick checks in `.github/workflows/tests.yml` (Python tests plus a UI typecheck and build)
+  and merge once those pass; anything the Windows build catches on main is fixed forward.
 - **Processor** (`geolock/devices.py`): Auto tries the Arc GPU, then the NPU, then the
   CPU; a fixed choice in Settings tries that device, then the CPU. A device that fails to
   compile, fails while running, or returns NaN/infinity is dropped and the photo carries
