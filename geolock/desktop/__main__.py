@@ -6,6 +6,12 @@ import threading
 import time
 from pathlib import Path
 
+# Single-threaded BLAS, set before numpy loads. GeoLock's matrix work is small, and
+# OpenBLAS's thread pool hung here twice: at DLL load on Windows (frozen) and inside a
+# matmul in the model-setup thread on Linux, after OpenVINO had run in the same process.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 
 def default_data_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.join(Path.home(), ".local", "share")
@@ -51,7 +57,6 @@ def main(argv=None):
     # Load the native libraries here, on the main thread, before any worker thread exists.
     # Frozen on Windows, scipy's OpenBLAS DLL first loaded from the model-loading thread
     # (after OpenVINO had started its thread pool) deadlocked in the loader (CI, 2026-10-15).
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
     import numpy  # noqa: F401
     import scipy.spatial  # noqa: F401
     import shapely  # noqa: F401
